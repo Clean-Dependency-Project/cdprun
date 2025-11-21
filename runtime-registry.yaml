@@ -1,0 +1,54 @@
+version: "1.0"
+metadata:
+ name: "Runtime Download Registry"
+ description: "Configuration for unified runtime download system - Node.js only"
+config:
+ download_timeout: "300s"
+ auto_download_all_platforms: true  
+ ignore_file: "policies/ignore-versions.yaml"
+ storage:
+   database_path: "./downloads.db"
+runtimes:
+  nodejs:
+   enabled: true
+   name: "Node.js"
+   description: "JavaScript runtime built on Chrome's V8 JavaScript engine"
+   endoflife_product: "nodejs"
+   policy_file: "policies/nodejs-policy.json"
+   version_pattern: "major"
+   supported_architectures:
+     - "x64"
+     - "aarch64"
+   supported_platforms:
+     - os: "windows"
+       arch: ["x64", "aarch64"]
+       file_extension: "msi"
+       download_name: "win"
+     - os: "linux"
+       arch: ["x64"]
+       file_extension: "tar.gz"
+       download_name: "linux"
+     - os: "mac"
+       arch: ["x64", "aarch64"]
+       file_extension: "pkg"
+       download_name: "darwin"
+   download:
+     base_url: "https://nodejs.org/dist"
+     url_pattern: "{base_url}/v{version}/node-v{version}-{platform}-{arch}.{ext}"
+     user_agent: "cdprun/1.0 (Node.js)"
+     requires_auth: false
+   verification:
+     enabled: true
+     methods:
+       checksum:
+         enabled: true
+         algorithm: "sha256"
+         file_pattern: "SHASUMS256.txt"
+         remote_checksum: true
+       gpg:
+         enabled: true
+         signature_pattern: "SHASUMS256.txt.asc"
+   endoflife:
+     product_name: "nodejs"
+     check_eol: true
+     warn_on_eol: true

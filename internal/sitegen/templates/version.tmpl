@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Runtime}} {{.Version}} - {{.OS}} - Runtime Downloads</title>
+    <link rel="stylesheet" href="../../../../assets/style.css">
+</head>
+<body>
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="../../../../index.html">All Runtimes</a> › 
+            <a href="../../../index.html">{{.Runtime}}</a> › 
+            <a href="../../index.html">{{.OS}}</a>
+        </div>
+        <h1>{{.Runtime}} {{.Version}}</h1>
+        <p>Verified binaries for {{.OS}}</p>
+    </div>
+    
+    <div class="container">
+        {{range .Releases}}
+        <div class="artifact-card">
+            <h3>Release: {{.ReleaseTag}}</h3>
+            {{range .Artifacts}}
+            <div class="platform-section">
+                <div class="platform-title">{{.Platform}}</div>
+                {{if .Binary}}
+                <div class="download-item">
+                    <a href="{{.Binary.URL}}" class="download-link">{{.Binary.Filename}}</a>
+                    <div class="download-meta">
+                        <span>Size: {{.Binary.Size | formatBytes}}</span>
+                        {{if .Binary.SHA256}}<span>SHA256: {{.Binary.SHA256}}</span>{{end}}
+                    </div>
+                </div>
+                {{end}}
+                {{if .Audit}}
+                <div class="download-item">
+                    <a href="{{.Audit.URL}}" class="download-link">{{.Audit.Filename}}</a>
+                    <div class="download-meta">
+                        <span>Size: {{.Audit.Size | formatBytes}}</span>
+                    </div>
+                </div>
+                {{end}}
+                {{if .Signature}}
+                <div class="download-item">
+                    <a href="{{.Signature.URL}}" class="download-link">{{.Signature.Filename}}</a>
+                    <div class="download-meta">
+                        <span>Size: {{.Signature.Size | formatBytes}}</span>
+                    </div>
+                </div>
+                {{end}}
+                {{if .Certificate}}
+                <div class="download-item">
+                    <a href="{{.Certificate.URL}}" class="download-link">{{.Certificate.Filename}}</a>
+                    <div class="download-meta">
+                        <span>Size: {{.Certificate.Size | formatBytes}}</span>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <p class="container">No artifacts available for {{.Runtime}} {{.Version}} on {{.OS}}.</p>
+        {{end}}
+    </div>
+</body>
+</html>
+

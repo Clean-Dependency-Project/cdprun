@@ -1,0 +1,65 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace file
+go.work
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Downloads - runtime binaries and artifacts
+downloads/
+downloads.db
+downloads.db-shm
+downloads.db-wal
+nodejs-downloads/
+test-downloads/
+test-dl/
+*-downloads/
+*-dl/
+
+# Audit and verification logs
+*.audit.json
+verification-logs/
+
+# Example and demo databases
+example_runtimes.db
+example_runtimes.db-shm
+example_runtimes.db-wal
+
+# Log files
+*.log
+error.log
+
+# Temporary files
+*.tmp
+*.temp
+output.json
+
+# Signing keys for local attestation (DO NOT COMMIT)
+.signing/
+*.pem
+*.key
+private-key.*
+
+# Site generator output
+_site/

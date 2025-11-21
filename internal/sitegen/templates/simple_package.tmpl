@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<head><title>Links for {{.Name}}</title></head>
+<body>
+<h1>Links for {{.Name}}</h1>
+{{range .Distributions}}
+<a href="{{.URL}}{{if .SHA256}}#sha256={{.SHA256}}{{end}}">{{.Filename}}</a><br/>
+{{end}}
+</body>
+</html>
+

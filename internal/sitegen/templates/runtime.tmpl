@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Name}} - Runtime Downloads</title>
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="../index.html">All Runtimes</a>
+        </div>
+        <h1>{{.Name}}</h1>
+        <p>Select your operating system</p>
+    </div>
+    
+    <div class="container">
+        <div class="card-grid">
+            {{range .Platforms}}
+            <div class="card">
+                <a href="{{.OS}}/index.html">
+                    <h2>{{.OS}}</h2>
+                    <span class="card-link-text">View Versions</span>
+                </a>
+            </div>
+            {{else}}
+            <p>No platforms available for {{.Name}}.</p>
+            {{end}}
+        </div>
+    </div>
+</body>
+</html>
+

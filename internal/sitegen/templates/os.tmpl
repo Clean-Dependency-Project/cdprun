@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Runtime}} - {{.OS}} - Runtime Downloads</title>
+    <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="../../index.html">All Runtimes</a> › <a href="../index.html">{{.Runtime}}</a>
+        </div>
+        <h1>{{.Runtime}} for {{.OS}}</h1>
+        <p>Available versions</p>
+    </div>
+    
+    <div class="container">
+        {{range $version := .Versions}}
+        <div class="list-section">
+            <h2 class="section-title">v{{$version.Major}}</h2>
+            <div class="item-list">
+                <div class="list-item">
+                    <a href="v{{$version.Major}}/{{$version.Version}}/index.html">{{$version.Version}}</a>
+                </div>
+            </div>
+        </div>
+        {{else}}
+        <p class="container">No versions available for {{.Runtime}} on {{.OS}}.</p>
+        {{end}}
+    </div>
+</body>
+</html>
+

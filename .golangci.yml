@@ -1,0 +1,52 @@
+# golangci-lint configuration aligned with Dave Cheney's principles
+# https://golangci-lint.run/usage/configuration/
+version: 2
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Core essentials only - Dave Cheney's most important principles
+    - errcheck        # Check for unchecked errors (Dave Cheney: explicit error handling)
+    - govet           # Go vet
+    - ineffassign     # Ineffectual assignments
+    - staticcheck     # Static analysis
+    - unused          # Unused code
+    
+    # Nice to have but not blocking
+    - bodyclose       # HTTP response body close (important)
+    - misspell        # Spelling mistakes
+    
+  disable:
+    # All other linters disabled for pragmatic development
+    # Can be enabled selectively later as needed
+
+linters-settings:
+  # Error handling settings
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      # Allow ignoring Close() in defer statements when explicitly ignored
+      - (io.Closer).Close
+
+issues:
+  # Show all issues
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+# Output configuration
+output:
+  formats:
+    colored-line-number:
+      path: stdout
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+severity:
+  default-severity: error

@@ -1,0 +1,16 @@
+# Ignore list for runtime versions that should not be downloaded on specific platforms
+# 
+# Structure:
+#   runtime_name:
+#     os_name:           # windows, linux, mac
+#       arch:            # x64, aarch64
+#         - "version"    # version pattern to ignore
+#
+# Patterns support prefix matching, e.g., "18" matches "18", "18.0", "18.20.8", etc.
+
+nodejs:
+  # Windows ARM64 builds are not available for Node.js versions before 20
+  windows:
+    aarch64:
+      - "18"   # Node.js 18.x is not available for Windows ARM64
+
