@@ -36,11 +36,11 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Delete previous downloads.db from GHCR
+      - name: Download previous downloads.db from GHCR
         run: |
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "Deleting previous database from ghcr.io/${REPO_LOWER}/downloads-db:latest"
-          oras manifest delete ghcr.io/${REPO_LOWER}/downloads-db:latest || echo "No existing database to delete"
+          echo "Downloading existing database from ghcr.io/${REPO_LOWER}/downloads-db:latest"
+          oras pull ghcr.io/${REPO_LOWER}/downloads-db:latest -o . || echo "No existing database found, starting fresh"
         continue-on-error: true
 
       - name: Run download command
