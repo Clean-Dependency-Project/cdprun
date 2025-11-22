@@ -151,15 +151,48 @@ func renderOSPages(tmpl *template.Template, runtimeName string, platform Platfor
 		return fmt.Errorf("failed to create OS directory: %w", err)
 	}
 
+	// Group versions by major version
+	type majorVersionGroup struct {
+		Major    int
+		Versions []VersionModel
+	}
+	
+	majorMap := make(map[int][]VersionModel)
+	for _, version := range platform.Versions {
+		majorMap[version.Major] = append(majorMap[version.Major], version)
+	}
+	
+	// Create sorted list of major versions (descending)
+	var majors []int
+	for major := range majorMap {
+		majors = append(majors, major)
+	}
+	// Sort descending (newest first)
+	for i := 0; i < len(majors); i++ {
+		for j := i + 1; j < len(majors); j++ {
+			if majors[i] < majors[j] {
+				majors[i], majors[j] = majors[j], majors[i]
+			}
+		}
+	}
+	
+	var versionsByMajor []majorVersionGroup
+	for _, major := range majors {
+		versionsByMajor = append(versionsByMajor, majorVersionGroup{
+			Major:    major,
+			Versions: majorMap[major],
+		})
+	}
+
 	// Render OS index: /<runtime>/<os>/index.html
 	osData := struct {
-		Runtime  string
-		OS       string
-		Versions []VersionModel
+		Runtime         string
+		OS              string
+		VersionsByMajor []majorVersionGroup
 	}{
-		Runtime:  runtimeName,
-		OS:       platform.OS,
-		Versions: platform.Versions,
+		Runtime:         runtimeName,
+		OS:              platform.OS,
+		VersionsByMajor: versionsByMajor,
 	}
 
 	var buf bytes.Buffer

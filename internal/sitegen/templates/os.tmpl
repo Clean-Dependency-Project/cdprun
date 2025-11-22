@@ -16,13 +16,15 @@
     </div>
     
     <div class="container">
-        {{range $version := .Versions}}
+        {{range $majorGroup := .VersionsByMajor}}
         <div class="list-section">
-            <h2 class="section-title">v{{$version.Major}}</h2>
+            <h2 class="section-title">v{{$majorGroup.Major}}</h2>
             <div class="item-list">
+                {{range $version := $majorGroup.Versions}}
                 <div class="list-item">
                     <a href="v{{$version.Major}}/{{$version.Version}}/index.html">{{$version.Version}}</a>
                 </div>
+                {{end}}
             </div>
         </div>
         {{else}}
