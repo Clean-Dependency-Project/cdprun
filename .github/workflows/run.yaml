@@ -44,7 +44,12 @@ jobs:
         continue-on-error: true
 
       - name: Run download command
-        run: ./bin/cdprun --log-level debug download
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "GITHUB_TOKEN is set: ${{ secrets.GITHUB_TOKEN != '' }}"
+          echo "Repository: ${{ github.repository }}"
+          ./bin/cdprun --log-level debug download
 
       - name: Verify downloads and database
         run: |
