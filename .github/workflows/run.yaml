@@ -44,7 +44,13 @@ jobs:
         continue-on-error: true
 
       - name: Run download command
-        run: ./bin/cdprun download
+        run: ./bin/cdprun --log-level debug download
+
+      - name: Verify downloads and database
+        run: |
+          ls -lh downloads.db
+          echo "Downloads directory:"
+          ls -la downloads/ || echo "No downloads directory"
 
       - name: Upload downloads.db to GHCR
         run: |
@@ -92,9 +98,19 @@ jobs:
           echo "Downloading database from ghcr.io/${REPO_LOWER}/downloads-db:latest"
           oras pull ghcr.io/${REPO_LOWER}/downloads-db:latest -o .
 
+      - name: Verify downloads.db exists
+        run: |
+          ls -lh downloads.db
+          file downloads.db
+
       - name: Generate static site
         run: |
-          ./bin/cdprun sitegen --db downloads.db --out _site
+          ./bin/cdprun --log-level debug sitegen --db downloads.db --out _site
+
+      - name: Verify site generation
+        run: |
+          ls -la _site/
+          find _site -type f | head -20
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
