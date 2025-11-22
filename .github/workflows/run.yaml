@@ -34,28 +34,18 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Test ORAS upload and download
+      - name: Download previous downloads.db from GHCR
         run: |
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "Testing ORAS functionality..."
-          echo "Repository (lowercase): ${REPO_LOWER}"
-          echo "test-content-$(date +%s)" > oras-test.txt
-          echo "Created test file with content: $(cat oras-test.txt)"
-          
-          echo "Pushing test file to GHCR..."
-          oras push ghcr.io/${REPO_LOWER}/oras-test:latest ./oras-test.txt
-          
-          echo "Removing local test file..."
-          rm oras-test.txt
-          
-          echo "Pulling test file from GHCR..."
-          oras pull ghcr.io/${REPO_LOWER}/oras-test:latest -o .
-          
-          echo "Verifying test file was downloaded..."
-          if [ -f oras-test.txt ]; then
-            echo " ORAS test successful! Downloaded content: $(cat oras-test.txt)"
-            rm oras-test.txt
-          else
-            echo "ORAS test failed - file not downloaded"
-            exit 1
-          fi
+          echo "Attempting to download existing database from ghcr.io/${REPO_LOWER}/downloads-db:latest"
+          oras pull ghcr.io/${REPO_LOWER}/downloads-db:latest -o . || echo "No existing database found, starting fresh"
+        continue-on-error: true
+
+      - name: Run download command
+        run: ./bin/cdprun download
+
+      - name: Upload downloads.db to GHCR
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "Uploading database to ghcr.io/${REPO_LOWER}/downloads-db:latest"
+          oras push ghcr.io/${REPO_LOWER}/downloads-db:latest ./downloads.db
