@@ -48,7 +48,33 @@ jobs:
 
       - name: Verify downloads and database
         run: |
+          echo "Database file:"
           ls -lh downloads.db
+          echo ""
+          echo "Checking database contents:"
+          DOWNLOAD_COUNT=$(sqlite3 downloads.db "SELECT COUNT(*) FROM downloads;")
+          RELEASE_COUNT=$(sqlite3 downloads.db "SELECT COUNT(*) FROM releases;")
+          echo "Total downloads in database: $DOWNLOAD_COUNT"
+          echo "Total releases in database: $RELEASE_COUNT"
+          
+          if [ "$DOWNLOAD_COUNT" -eq 0 ]; then
+            echo "ERROR: Database has no downloads! Download command may have failed."
+            exit 1
+          fi
+          
+          if [ "$RELEASE_COUNT" -eq 0 ]; then
+            echo "ERROR: Database has no releases! Auto-release may have failed."
+            echo "This will cause sitegen to fail."
+            exit 1
+          fi
+          
+          echo ""
+          echo "Sample downloads:"
+          sqlite3 downloads.db "SELECT runtime, version, platform, architecture, filename FROM downloads LIMIT 5;"
+          echo ""
+          echo "Sample releases:"
+          sqlite3 downloads.db "SELECT runtime, version, release_tag FROM releases LIMIT 5;"
+          echo ""
           echo "Downloads directory:"
           ls -la downloads/ || echo "No downloads directory"
 
@@ -102,15 +128,34 @@ jobs:
         run: |
           ls -lh downloads.db
           file downloads.db
+          echo "Checking database contents:"
+          RELEASE_COUNT=$(sqlite3 downloads.db "SELECT COUNT(*) FROM releases;")
+          echo "Release count: $RELEASE_COUNT"
+          if [ "$RELEASE_COUNT" -eq 0 ]; then
+            echo "ERROR: No releases in database! Sitegen will have nothing to generate."
+            exit 1
+          fi
+          echo "Sample releases:"
+          sqlite3 downloads.db "SELECT runtime, version, release_tag FROM releases LIMIT 5;"
 
       - name: Generate static site
         run: |
+          set -e  # Exit on error
           ./bin/cdprun --log-level debug sitegen --db downloads.db --out _site
+          echo "Site generation completed with exit code: $?"
 
       - name: Verify site generation
         run: |
-          ls -la _site/
-          find _site -type f | head -20
+          if [ -d "_site" ]; then
+            echo "Site directory exists"
+            ls -la _site/
+            echo "Files in site:"
+            find _site -type f | head -20
+          else
+            echo "ERROR: _site directory was not created!"
+            echo "This means sitegen failed or had no data to generate"
+            exit 1
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
