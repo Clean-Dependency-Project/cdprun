@@ -621,9 +621,8 @@ func (a *NodeJSAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policyVers
 		if pv.EOL != "" {
 			version.EOLDate = pv.EOL
 		}
-		if pv.LatestPatchVersion != "" {
-			version.LatestPatch = pv.LatestPatchVersion
-		}
+		// Note: LatestPatch comes from endoflife.date API, not policy file
+		// Policy file should only control which versions are supported/allowed
 
 		filtered = append(filtered, version)
 	}
