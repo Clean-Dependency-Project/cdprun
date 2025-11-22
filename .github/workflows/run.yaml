@@ -36,18 +36,20 @@ jobs:
 
       - name: Test ORAS upload and download
         run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "Testing ORAS functionality..."
+          echo "Repository (lowercase): ${REPO_LOWER}"
           echo "test-content-$(date +%s)" > oras-test.txt
           echo "Created test file with content: $(cat oras-test.txt)"
           
           echo "Pushing test file to GHCR..."
-          oras push ghcr.io/${{ github.repository }}/oras-test:latest ./oras-test.txt
+          oras push ghcr.io/${REPO_LOWER}/oras-test:latest ./oras-test.txt
           
           echo "Removing local test file..."
           rm oras-test.txt
           
           echo "Pulling test file from GHCR..."
-          oras pull ghcr.io/${{ github.repository }}/oras-test:latest -o .
+          oras pull ghcr.io/${REPO_LOWER}/oras-test:latest -o .
           
           echo "Verifying test file was downloaded..."
           if [ -f oras-test.txt ]; then
@@ -57,4 +59,3 @@ jobs:
             echo "ORAS test failed - file not downloaded"
             exit 1
           fi
-
