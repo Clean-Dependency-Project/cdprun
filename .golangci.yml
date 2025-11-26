@@ -1,6 +1,6 @@
 # golangci-lint configuration aligned with Dave Cheney's principles
 # https://golangci-lint.run/usage/configuration/
-version: 2
+version: "2"
 
 run:
   timeout: 5m
@@ -20,18 +20,18 @@ linters:
     - bodyclose       # HTTP response body close (important)
     - misspell        # Spelling mistakes
     
-  disable:
+  disable: []
     # All other linters disabled for pragmatic development
     # Can be enabled selectively later as needed
 
-linters-settings:
-  # Error handling settings
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-    exclude-functions:
-      # Allow ignoring Close() in defer statements when explicitly ignored
-      - (io.Closer).Close
+  settings:
+    # Error handling settings
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        # Allow ignoring Close() in defer statements when explicitly ignored
+        - (io.Closer).Close
 
 issues:
   # Show all issues
@@ -41,12 +41,11 @@ issues:
 # Output configuration
 output:
   formats:
-    colored-line-number:
+    text:
       path: stdout
-  print-issued-lines: true
-  print-linter-name: true
-  uniq-by-line: true
-  sort-results: true
+      print-linter-name: true
+      print-issued-lines: true
+      colors: true
 
 severity:
-  default-severity: error
+  default: error
