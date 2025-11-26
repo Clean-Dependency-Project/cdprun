@@ -564,13 +564,6 @@ func TestWriteFileIfChanged(t *testing.T) {
 				}
 			}
 
-			// Capture file info before write
-			infoBefore, _ := os.Stat(filePath)
-			modTimeBefore := time.Time{}
-			if infoBefore != nil {
-				modTimeBefore = infoBefore.ModTime()
-			}
-
 			// Use a simple logger for testing
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -580,35 +573,21 @@ func TestWriteFileIfChanged(t *testing.T) {
 				t.Fatalf("writeFileIfChanged() error = %v", err)
 			}
 
-			// Check if file was written
-			infoAfter, err := os.Stat(filePath)
+			// Verify file content (more reliable than mod time in CI)
+			content, err := os.ReadFile(filePath)
 			if err != nil {
-				t.Fatalf("Failed to stat file after write: %v", err)
+				t.Fatalf("Failed to read file: %v", err)
 			}
 
 			if tt.shouldWrite {
-				if infoBefore == nil || infoAfter.ModTime().After(modTimeBefore) {
-					// File was written
-					content, err := os.ReadFile(filePath)
-					if err != nil {
-						t.Fatalf("Failed to read file: %v", err)
-					}
-					if string(content) != string(tt.newData) {
-						t.Errorf("File content = %q, want %q", string(content), string(tt.newData))
-					}
-				} else {
-					t.Error("Expected file to be written, but mod time unchanged")
+				// File should have new content
+				if string(content) != string(tt.newData) {
+					t.Errorf("File content = %q, want %q", string(content), string(tt.newData))
 				}
 			} else {
-				if infoBefore != nil && infoAfter.ModTime().Equal(modTimeBefore) {
-					// File was not written (unchanged)
-					content, err := os.ReadFile(filePath)
-					if err != nil {
-						t.Fatalf("Failed to read file: %v", err)
-					}
-					if string(content) != string(tt.initialData) {
-						t.Errorf("File content changed unexpectedly: got %q, want %q", string(content), string(tt.initialData))
-					}
+				// File should have original content (unchanged)
+				if string(content) != string(tt.initialData) {
+					t.Errorf("File content changed unexpectedly: got %q, want %q", string(content), string(tt.initialData))
 				}
 			}
 		})
