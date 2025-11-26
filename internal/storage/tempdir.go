@@ -45,7 +45,7 @@ func NewTempDir(runtime, version string) (*TempDir, error) {
 	if err := os.MkdirAll(downloads, 0755); err != nil {
 		// Clean up root if subdirectory creation fails
 		// Ignore cleanup error as we're already returning an error
-		_ = os.RemoveAll(root)
+		_ = os.RemoveAll(root) //nolint:errcheck // Cleanup on error path, ignore failure
 		return nil, fmt.Errorf("failed to create downloads directory: %w", err)
 	}
 
@@ -53,7 +53,7 @@ func NewTempDir(runtime, version string) (*TempDir, error) {
 	signatures := filepath.Join(root, "signatures")
 	if err := os.MkdirAll(signatures, 0755); err != nil {
 		// Clean up on failure - ignore error as we're already returning an error
-		_ = os.RemoveAll(root)
+		_ = os.RemoveAll(root) //nolint:errcheck // Cleanup on error path, ignore failure
 		return nil, fmt.Errorf("failed to create signatures directory: %w", err)
 	}
 

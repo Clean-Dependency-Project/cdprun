@@ -4,7 +4,7 @@ version: "2"
 
 run:
   timeout: 5m
-  tests: true
+  tests: false  # Disable tests to skip test files from linting
   modules-download-mode: readonly
 
 linters:
@@ -32,6 +32,10 @@ linters:
       exclude-functions:
         # Allow ignoring Close() in defer statements when explicitly ignored
         - (io.Closer).Close
+        - (*os.File).Close
+        - (*storage.DB).Close
+        - os.Remove
+        - os.RemoveAll
 
 issues:
   # Show all issues

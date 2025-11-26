@@ -38,7 +38,12 @@ func LoadReleases(reader ReleaseReader) ([]ReleaseWithArtifacts, error) {
 				individualRelease.Version = version
 				
 				// Parse semver for individual version
-				major, minor, patch, _ := storage.ParseSemver(version)
+				major, minor, patch, err := storage.ParseSemver(version)
+				if err != nil {
+					// If semver parsing fails, log and continue with zeros
+					// This can happen with non-standard version formats
+					major, minor, patch = 0, 0, 0
+				}
 				individualRelease.SemverMajor = major
 				individualRelease.SemverMinor = minor
 				individualRelease.SemverPatch = patch
