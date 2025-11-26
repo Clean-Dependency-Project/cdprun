@@ -202,3 +202,76 @@ func TestDockerScanner_Scan_DockerUnavailable(t *testing.T) {
 		t.Errorf("expected ErrDockerUnavailable, got: %v", err)
 	}
 }
+
+func TestParseDockerOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty output",
+			input:    "",
+			expected: "",
+		},
+		{
+			name: "filter Docker pull progress lines",
+			input: `Pulling from clamav/clamav-debian
+Digest: sha256:abc123def456
+Status: Downloaded newer image
+Downloaded newer image for clamav/clamav-debian:latest
+/scan: OK
+----------- SCAN SUMMARY -----------
+Known viruses: 8708721`,
+			expected: `/scan: OK
+----------- SCAN SUMMARY -----------
+Known viruses: 8708721`,
+		},
+		{
+			name: "only progress lines",
+			input: `Pulling from clamav/clamav-debian
+Digest: sha256:abc123
+Status: Downloaded`,
+			expected: "",
+		},
+		{
+			name: "mixed content",
+			input: `Pulling from clamav/clamav-debian
+/scan: OK
+Digest: sha256:abc123
+Scan result here
+Status: Downloaded`,
+			expected: `/scan: OK
+Scan result here`,
+		},
+		{
+			name: "no progress lines",
+			input: `/scan: OK
+----------- SCAN SUMMARY -----------
+Known viruses: 8708721
+Infected files: 0`,
+			expected: `/scan: OK
+----------- SCAN SUMMARY -----------
+Known viruses: 8708721
+Infected files: 0`,
+		},
+		{
+			name: "Status line with different case",
+			input: `status: downloading
+/scan: OK
+STATUS: complete`,
+			expected: `status: downloading
+/scan: OK
+STATUS: complete`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseDockerOutput(tt.input)
+			if got != tt.expected {
+				t.Errorf("ParseDockerOutput() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
