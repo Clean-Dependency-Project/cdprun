@@ -1,3 +1,4 @@
 ignore:
-  - "cmd/**/*"
-  - "internal/cli/**/*"
+  - "cmd/"
+  - "internal/cli/"
+  - "internal/sitegen/testserver/"
