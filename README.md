@@ -1,6 +1,8 @@
 # CDPRun
 
 [![codecov](https://codecov.io/gh/Clean-Dependency-Project/cdprun/graph/badge.svg?token=MV8YMFTM89)](https://codecov.io/gh/Clean-Dependency-Project/cdprun)
+[![Go Reference](https://pkg.go.dev/badge/github.com/clean-dependency-project/cdprun.svg)](https://pkg.go.dev/github.com/clean-dependency-project/cdprun)
+[![golangci-lint](https://github.com/Clean-Dependency-Project/cdprun/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/Clean-Dependency-Project/cdprun/actions/workflows/build.yaml)
 
 CDPRun is a tool for downloading and managing runtime binaries like Node.js, Python, and more.
 It is designed to be a single tool that can be used to download and manage runtime binaries for a variety of languages and frameworks.
