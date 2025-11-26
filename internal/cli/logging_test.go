@@ -93,7 +93,7 @@ func TestNewLoggersWithOutputFormat_JSONOutput(t *testing.T) {
 
 	defer func() {
 		os.Stderr = oldStderr
-		w.Close()
+		_ = w.Close()
 	}()
 
 	stdout, stderr := NewLoggersWithOutputFormat(slog.LevelInfo, "json")
@@ -105,9 +105,9 @@ func TestNewLoggersWithOutputFormat_JSONOutput(t *testing.T) {
 	stderr.Info("test message", "key", "value")
 
 	// Close write end and read output
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	output := buf.String()
 	if !strings.Contains(output, "test message") {
@@ -217,7 +217,7 @@ func TestLoggersWriteToStderr(t *testing.T) {
 
 	defer func() {
 		os.Stderr = oldStderr
-		w.Close()
+		_ = w.Close()
 	}()
 
 	stdout, stderr := NewLoggers(slog.LevelInfo)
@@ -227,9 +227,9 @@ func TestLoggersWriteToStderr(t *testing.T) {
 	stderr.Info("stderr message")
 
 	// Close write end and read output
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	output := buf.String()
 	if !strings.Contains(output, "stdout message") {

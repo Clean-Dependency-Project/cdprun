@@ -10,12 +10,6 @@ func TestNewClientFactory(t *testing.T) {
 	if factory == nil {
 		t.Error("NewClientFactory() returned nil")
 	}
-
-	// Verify it implements the ClientFactory interface
-	_, ok := factory.(ClientFactory)
-	if !ok {
-		t.Error("NewClientFactory() does not implement ClientFactory interface")
-	}
 }
 
 func TestDefaultClientFactory_CreateClient(t *testing.T) {
@@ -205,7 +199,7 @@ func TestDefaultClientFactory_CreateClient_InterfaceCompliance(t *testing.T) {
 			}
 
 			// Verify client implements Client interface by checking it can be assigned
-			var _ Client = client
+			_ = client
 		})
 	}
 }

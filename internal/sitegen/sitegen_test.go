@@ -1,6 +1,7 @@
 package sitegen
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -668,9 +669,6 @@ func TestNewGenerator(t *testing.T) {
 	reader := &mockReleaseReader{}
 
 	gen := NewGenerator(reader, logger)
-	if gen == nil {
-		t.Error("NewGenerator() returned nil")
-	}
 	if gen.reader != reader {
 		t.Error("NewGenerator() reader mismatch")
 	}
@@ -760,7 +758,7 @@ func TestGenerator_Generate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gen := NewGenerator(tt.reader, logger)
-			err := gen.Generate(nil, tt.opts)
+			err := gen.Generate(context.TODO(), tt.opts)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Generate() expected error, got nil")

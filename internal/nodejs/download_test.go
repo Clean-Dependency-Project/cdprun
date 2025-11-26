@@ -239,13 +239,13 @@ func TestDownloadAndParseSHASUMS(t *testing.T) {
 		path := r.URL.Path
 		if strings.Contains(path, "SHASUMS256.txt") && !strings.Contains(path, ".sig") && !strings.Contains(path, ".asc") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(shasumContent))
+			_, _ = w.Write([]byte(shasumContent))
 		} else if strings.Contains(path, ".sig") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(sigContent))
+			_, _ = w.Write([]byte(sigContent))
 		} else if strings.Contains(path, ".asc") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(ascContent))
+			_, _ = w.Write([]byte(ascContent))
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -278,7 +278,7 @@ func TestDownloadAndParseSHASUMS(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open file: %v", err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		checksums := make(map[string]string)
 		scanner := strings.NewReader(shasumContent)
@@ -310,7 +310,7 @@ func TestDownloadAndParseSHASUMS(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open file: %v", err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		checksums := make(map[string]string)
 		lines := strings.Split("", "\n")
@@ -345,19 +345,19 @@ func TestDownload(t *testing.T) {
 		if strings.Contains(r.URL.Path, "SHASUMS256.txt") {
 			shasumContent := expectedChecksum + "  node-v22.15.0.tar.gz\n"
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(shasumContent))
+			_, _ = w.Write([]byte(shasumContent))
 			return
 		}
 
 		if strings.Contains(r.URL.Path, ".sig") || strings.Contains(r.URL.Path, ".asc") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("signature"))
+			_, _ = w.Write([]byte("signature"))
 			return
 		}
 
 		if strings.Contains(r.URL.Path, "node-v22.15.0.tar.gz") {
 			w.WriteHeader(http.StatusOK)
-			w.Write(testData)
+			_, _ = w.Write(testData)
 			return
 		}
 
