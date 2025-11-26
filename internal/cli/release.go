@@ -76,7 +76,12 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 	// For aggregated releases, semver is less meaningful
 	var major, minor, patch int
 	if len(versions) > 0 {
-		major, minor, patch, _ = storage.ParseSemver(versions[0])
+		var err error
+		major, minor, patch, err = storage.ParseSemver(versions[0])
+		if err != nil {
+			// If semver parsing fails, use zeros (aggregated releases may have non-standard versions)
+			major, minor, patch = 0, 0, 0
+		}
 	}
 
 	// Generate release metadata
@@ -419,6 +424,8 @@ func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult)
 }
 
 // formatReleaseName generates the release name from template.
+// This function is used in tests.
+//nolint:unused // Used in release_test.go
 func (rm *ReleaseManager) formatReleaseName(template, runtime, version string) string {
 	if template == "" {
 		return fmt.Sprintf("%s %s", runtime, version)

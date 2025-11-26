@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +16,27 @@ func TestIntegration_DockerScanner_RealDocker(t *testing.T) {
 		t.Skip("Docker not available, skipping integration test")
 	}
 
-	scanner := NewDockerScanner(runner, "clamav/clamav-debian:latest", nil)
+	image := "clamav/clamav-debian:latest"
+	scanner := NewDockerScanner(runner, image, nil)
+
+	// Try to ensure image by attempting a version check
+	// This will fail if image can't be pulled, allowing us to skip gracefully
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	// Attempt a scan - if it fails due to image pull, skip the test
+	_, err := scanner.Scan(ctx, testFile)
+	if err != nil {
+		if strings.Contains(err.Error(), "failed to ensure image") || strings.Contains(err.Error(), "failed to pull image") {
+			t.Skipf("Cannot ensure Docker image %s (may require network access): %v", image, err)
+		}
+		// Other errors are real failures
+		t.Fatalf("Scan() failed unexpectedly: %v", err)
+	}
 
 	t.Run("clean file", func(t *testing.T) {
 		// Create a clean test file

@@ -241,7 +241,12 @@ func downloadRuntime(c *cli.Context) error {
 		stderr.Error("failed to initialize database", "error", err)
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			// Log close error but don't fail - we're in cleanup
+			stderr.Warn("failed to close database", "error", closeErr)
+		}
+	}()
 
 	// Initialize manager (loads policy, registers adapters with endoflife client)
 	manager, cfg, err := initializeManager(c.String("config"), db, stdout, stderr)

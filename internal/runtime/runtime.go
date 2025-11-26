@@ -830,7 +830,7 @@ func (d *ConcurrentDownloader) downloadFile(ctx context.Context, task DownloadTa
 		return result
 	}
 	defer func() {
-		_ = out.Close() // Ignore close error to not override return error
+		_ = out.Close() // Ignore close error to not override the main error
 	}()
 
 	// Make HTTP request
@@ -857,7 +857,7 @@ func (d *ConcurrentDownloader) downloadFile(ctx context.Context, task DownloadTa
 			result.FileSize = 0
 			result.Size = 0
 			// Remove the empty file we created
-			_ = os.Remove(task.OutputPath) // Ignore error if file doesn't exist
+			_ = os.Remove(task.OutputPath) // Ignore error if file doesn't exist - this is cleanup
 
 			d.stdout.Debug("optional file not available",
 				"url", task.URL,
