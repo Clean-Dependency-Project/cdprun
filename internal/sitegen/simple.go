@@ -275,6 +275,64 @@ func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logg
 		return fmt.Errorf("failed to write simple root index: %w", err)
 	}
 
-	logger.Info("rendered simple root index", "path", path, "runtimes", len(runtimeNames))
+	// Also render consolidated JSON index with all artifact paths across all runtimes
+	allPaths := collectAllArtifactPaths(model)
+	jsonData, err := json.MarshalIndent(allPaths, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize consolidated artifact index: %w", err)
+	}
+
+	jsonPath := filepath.Join(simpleDir, "index.json")
+	if err := writeFileIfChanged(jsonPath, jsonData, logger); err != nil {
+		return fmt.Errorf("failed to write consolidated JSON index: %w", err)
+	}
+
+	logger.Info("rendered simple root index", "path", path, "runtimes", len(runtimeNames), "total_artifacts", len(allPaths))
 	return nil
+}
+
+// collectAllArtifactPaths returns all artifact paths across all runtimes in the model.
+func collectAllArtifactPaths(model *SiteModel) []string {
+	paths := make(map[string]struct{})
+
+	for _, runtime := range model.Runtimes {
+		collectRuntimeArtifacts(runtime, paths)
+	}
+
+	result := make([]string, 0, len(paths))
+	for path := range paths {
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// collectRuntimeArtifacts extracts artifact paths from a single runtime into the provided map.
+func collectRuntimeArtifacts(runtime RuntimeModel, paths map[string]struct{}) {
+	for _, platform := range runtime.Platforms {
+		for _, version := range platform.Versions {
+			collectVersionArtifacts(version, paths)
+		}
+	}
+}
+
+// collectVersionArtifacts extracts artifact paths from a version's releases.
+func collectVersionArtifacts(version VersionModel, paths map[string]struct{}) {
+	for _, release := range version.Releases {
+		if release.ReleaseTag == "" {
+			continue
+		}
+		collectReleaseArtifacts(release, paths)
+	}
+}
+
+// collectReleaseArtifacts extracts binary artifact paths from a single release.
+func collectReleaseArtifacts(release ReleaseModel, paths map[string]struct{}) {
+	for _, artifact := range release.Artifacts {
+		if artifact.Binary == nil {
+			continue
+		}
+		path := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
+		paths[path] = struct{}{}
+	}
 }
