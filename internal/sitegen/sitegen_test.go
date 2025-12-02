@@ -2,6 +2,7 @@ package sitegen
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -480,11 +481,11 @@ func TestLoadReleases(t *testing.T) {
 			reader: &mockReleaseReader{
 				releases: []storage.Release{
 					{
-						Runtime:     "nodejs",
-						Version:     "22.15.0",
-						ReleaseTag:  "nodejs-v22.15.0",
-						Artifacts:   `invalid json`,
-						CreatedAt:   now,
+						Runtime:    "nodejs",
+						Version:    "22.15.0",
+						ReleaseTag: "nodejs-v22.15.0",
+						Artifacts:  `invalid json`,
+						CreatedAt:  now,
 					},
 				},
 			},
@@ -661,10 +662,10 @@ func TestGenerator_Generate(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	tests := []struct {
-		name     string
-		reader   ReleaseReader
-		opts     GenerateOptions
-		wantErr  bool
+		name    string
+		reader  ReleaseReader
+		opts    GenerateOptions
+		wantErr bool
 	}{
 		{
 			name: "successful generation",
@@ -899,6 +900,26 @@ func TestRenderSimpleIndex(t *testing.T) {
 	if _, err := os.Stat(nodejsDir); os.IsNotExist(err) {
 		t.Error("Expected simple/nodejs directory to exist")
 	}
+
+	// Verify JSON artifact index for v22 was created with expected path
+	jsonPath := filepath.Join(nodejsDir, "v22", "index.json")
+	content, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("Expected %s to exist: %v", jsonPath, err)
+	}
+
+	var entries []string
+	if err := json.Unmarshal(content, &entries); err != nil {
+		t.Fatalf("Failed to parse JSON artifact index: %v", err)
+	}
+
+	expected := []string{"nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz"}
+	if len(entries) != len(expected) {
+		t.Fatalf("JSON artifact index length = %d, want %d", len(entries), len(expected))
+	}
+	if entries[0] != expected[0] {
+		t.Errorf("JSON artifact entry = %q, want %q", entries[0], expected[0])
+	}
 }
 
 func TestCollectMajorVersions(t *testing.T) {
@@ -1015,4 +1036,3 @@ func TestRenderSimpleIndex_EmptyModel(t *testing.T) {
 		t.Error("Expected simple/index.html to exist even with empty model")
 	}
 }
-
