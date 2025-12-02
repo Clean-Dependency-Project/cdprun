@@ -2,6 +2,7 @@ package sitegen
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -480,11 +481,11 @@ func TestLoadReleases(t *testing.T) {
 			reader: &mockReleaseReader{
 				releases: []storage.Release{
 					{
-						Runtime:     "nodejs",
-						Version:     "22.15.0",
-						ReleaseTag:  "nodejs-v22.15.0",
-						Artifacts:   `invalid json`,
-						CreatedAt:   now,
+						Runtime:    "nodejs",
+						Version:    "22.15.0",
+						ReleaseTag: "nodejs-v22.15.0",
+						Artifacts:  `invalid json`,
+						CreatedAt:  now,
 					},
 				},
 			},
@@ -661,10 +662,10 @@ func TestGenerator_Generate(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	tests := []struct {
-		name     string
-		reader   ReleaseReader
-		opts     GenerateOptions
-		wantErr  bool
+		name    string
+		reader  ReleaseReader
+		opts    GenerateOptions
+		wantErr bool
 	}{
 		{
 			name: "successful generation",
@@ -751,3 +752,287 @@ func TestGenerator_Generate(t *testing.T) {
 	}
 }
 
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		bytes    int64
+		expected string
+	}{
+		{"zero bytes", 0, "0 B"},
+		{"small bytes", 512, "512 B"},
+		{"one KB", 1024, "1.0 KB"},
+		{"one MB", 1024 * 1024, "1.0 MB"},
+		{"one GB", 1024 * 1024 * 1024, "1.0 GB"},
+		{"mixed size", 1536, "1.5 KB"},
+		{"large MB", 50 * 1024 * 1024, "50.0 MB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatBytes(tt.bytes)
+			if got != tt.expected {
+				t.Errorf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRenderHumanPages(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tempDir := t.TempDir()
+
+	model := &SiteModel{
+		Runtimes: []RuntimeModel{
+			{
+				Name: "nodejs",
+				Platforms: []PlatformModel{
+					{
+						OS: "linux",
+						Versions: []VersionModel{
+							{
+								Major:   22,
+								Minor:   15,
+								Patch:   0,
+								Version: "22.15.0",
+								Releases: []ReleaseModel{
+									{
+										ReleaseTag: "nodejs-22.15.0",
+										ReleaseURL: "https://github.com/test/releases/tag/nodejs-22.15.0",
+										Artifacts: []ArtifactModel{
+											{
+												Platform:     "linux-x64",
+												PlatformOS:   "linux",
+												PlatformArch: "x64",
+												Binary: &FileModel{
+													Filename: "node-v22.15.0-linux-x64.tar.gz",
+													Size:     1024 * 1024,
+													SHA256:   "abc123",
+													URL:      "https://example.com/node-v22.15.0-linux-x64.tar.gz",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := RenderHumanPages(model, tempDir, logger)
+	if err != nil {
+		t.Fatalf("RenderHumanPages() error = %v", err)
+	}
+
+	// Verify root index exists
+	rootIndex := filepath.Join(tempDir, "index.html")
+	if _, err := os.Stat(rootIndex); os.IsNotExist(err) {
+		t.Error("Expected root index.html to exist")
+	}
+
+	// Verify assets directory exists
+	assetsDir := filepath.Join(tempDir, "assets")
+	if _, err := os.Stat(assetsDir); os.IsNotExist(err) {
+		t.Error("Expected assets directory to exist")
+	}
+
+	// Verify runtime directory exists
+	runtimeDir := filepath.Join(tempDir, "nodejs")
+	if _, err := os.Stat(runtimeDir); os.IsNotExist(err) {
+		t.Error("Expected nodejs directory to exist")
+	}
+}
+
+func TestRenderSimpleIndex(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tempDir := t.TempDir()
+
+	model := &SiteModel{
+		Runtimes: []RuntimeModel{
+			{
+				Name: "nodejs",
+				Platforms: []PlatformModel{
+					{
+						OS: "linux",
+						Versions: []VersionModel{
+							{
+								Major:   22,
+								Minor:   15,
+								Patch:   0,
+								Version: "22.15.0",
+								Releases: []ReleaseModel{
+									{
+										ReleaseTag: "nodejs-22.15.0",
+										Artifacts: []ArtifactModel{
+											{
+												Binary: &FileModel{
+													Filename: "node-v22.15.0-linux-x64.tar.gz",
+													URL:      "https://example.com/binary.tar.gz",
+													SHA256:   "abc123",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := RenderSimpleIndex(model, tempDir, logger)
+	if err != nil {
+		t.Fatalf("RenderSimpleIndex() error = %v", err)
+	}
+
+	// Verify simple root index exists
+	simpleIndex := filepath.Join(tempDir, "simple", "index.html")
+	if _, err := os.Stat(simpleIndex); os.IsNotExist(err) {
+		t.Error("Expected simple/index.html to exist")
+	}
+
+	// Verify runtime directory exists
+	nodejsDir := filepath.Join(tempDir, "simple", "nodejs")
+	if _, err := os.Stat(nodejsDir); os.IsNotExist(err) {
+		t.Error("Expected simple/nodejs directory to exist")
+	}
+
+	// Verify JSON artifact index for v22 was created with expected path
+	jsonPath := filepath.Join(nodejsDir, "v22", "index.json")
+	content, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("Expected %s to exist: %v", jsonPath, err)
+	}
+
+	var entries []string
+	if err := json.Unmarshal(content, &entries); err != nil {
+		t.Fatalf("Failed to parse JSON artifact index: %v", err)
+	}
+
+	expected := []string{"nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz"}
+	if len(entries) != len(expected) {
+		t.Fatalf("JSON artifact index length = %d, want %d", len(entries), len(expected))
+	}
+	if entries[0] != expected[0] {
+		t.Errorf("JSON artifact entry = %q, want %q", entries[0], expected[0])
+	}
+}
+
+func TestCollectMajorVersions(t *testing.T) {
+	runtime := RuntimeModel{
+		Name: "nodejs",
+		Platforms: []PlatformModel{
+			{
+				OS: "linux",
+				Versions: []VersionModel{
+					{Major: 22, Version: "22.15.0"},
+					{Major: 20, Version: "20.10.0"},
+				},
+			},
+			{
+				OS: "mac",
+				Versions: []VersionModel{
+					{Major: 22, Version: "22.15.0"},
+					{Major: 18, Version: "18.20.0"},
+				},
+			},
+		},
+	}
+
+	majors := collectMajorVersions(runtime)
+
+	if len(majors) != 3 {
+		t.Errorf("collectMajorVersions() returned %d majors, want 3", len(majors))
+	}
+
+	expected := []int{18, 20, 22}
+	for i, v := range expected {
+		if majors[i] != v {
+			t.Errorf("collectMajorVersions()[%d] = %d, want %d", i, majors[i], v)
+		}
+	}
+}
+
+func TestCollectDistributionsFromVersion(t *testing.T) {
+	version := VersionModel{
+		Major:   22,
+		Version: "22.15.0",
+		Releases: []ReleaseModel{
+			{
+				ReleaseTag: "nodejs-22.15.0",
+				Artifacts: []ArtifactModel{
+					{
+						Binary: &FileModel{
+							Filename: "node-v22.15.0-linux-x64.tar.gz",
+							URL:      "https://example.com/binary.tar.gz",
+							SHA256:   "abc123",
+						},
+						Audit: &FileModel{
+							Filename: "node-v22.15.0-linux-x64.audit.json",
+							URL:      "https://example.com/audit.json",
+						},
+						Signature: &FileModel{
+							Filename: "node-v22.15.0-linux-x64.tar.gz.sig",
+							URL:      "https://example.com/binary.sig",
+							SHA256:   "sig123",
+						},
+						Certificate: &FileModel{
+							Filename: "node-v22.15.0-linux-x64.tar.gz.cert",
+							URL:      "https://example.com/binary.cert",
+							SHA256:   "cert123",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	distMap := make(map[string]DistributionModel)
+	collectDistributionsFromVersion(version, distMap)
+
+	if len(distMap) != 4 {
+		t.Errorf("collectDistributionsFromVersion() collected %d distributions, want 4", len(distMap))
+	}
+}
+
+func TestRenderHumanPages_EmptyModel(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tempDir := t.TempDir()
+
+	model := &SiteModel{
+		Runtimes: []RuntimeModel{},
+	}
+
+	err := RenderHumanPages(model, tempDir, logger)
+	if err != nil {
+		t.Fatalf("RenderHumanPages() with empty model error = %v", err)
+	}
+
+	rootIndex := filepath.Join(tempDir, "index.html")
+	if _, err := os.Stat(rootIndex); os.IsNotExist(err) {
+		t.Error("Expected root index.html to exist even with empty model")
+	}
+}
+
+func TestRenderSimpleIndex_EmptyModel(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tempDir := t.TempDir()
+
+	model := &SiteModel{
+		Runtimes: []RuntimeModel{},
+	}
+
+	err := RenderSimpleIndex(model, tempDir, logger)
+	if err != nil {
+		t.Fatalf("RenderSimpleIndex() with empty model error = %v", err)
+	}
+
+	simpleIndex := filepath.Join(tempDir, "simple", "index.html")
+	if _, err := os.Stat(simpleIndex); os.IsNotExist(err) {
+		t.Error("Expected simple/index.html to exist even with empty model")
+	}
+}

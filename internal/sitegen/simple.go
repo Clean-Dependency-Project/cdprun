@@ -2,6 +2,7 @@ package sitegen
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -11,8 +12,9 @@ import (
 
 // RenderSimpleIndex generates hierarchical Simple index pages.
 // Creates: /simple/index.html (runtimes)
-//          /simple/<runtime>/index.html (versions)
-//          /simple/<runtime>/v<major>/index.html (binaries)
+//
+//	/simple/<runtime>/index.html (versions)
+//	/simple/<runtime>/v<major>/index.html (binaries)
 func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) error {
 	simpleDir := filepath.Join(outDir, "simple")
 
@@ -148,7 +150,19 @@ func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logge
 		return fmt.Errorf("failed to write version page: %w", err)
 	}
 
-	logger.Debug("rendered version page", "runtime", runtime.Name, "major", major, "distributions", len(distributions))
+	// Also render JSON index for automation tooling (e.g., Nexus proxy discovery)
+	artifactPaths := collectArtifactPathsByMajor(runtime, major)
+	jsonData, err := json.MarshalIndent(artifactPaths, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize artifact index: %w", err)
+	}
+
+	jsonPath := filepath.Join(versionDir, "index.json")
+	if err := writeFileIfChanged(jsonPath, jsonData, logger); err != nil {
+		return fmt.Errorf("failed to write version JSON index: %w", err)
+	}
+
+	logger.Debug("rendered version page", "runtime", runtime.Name, "major", major, "distributions", len(distributions), "artifact_paths", len(artifactPaths))
 	return nil
 }
 
@@ -207,6 +221,36 @@ func collectDistributionsFromVersion(version VersionModel, distMap map[string]Di
 	}
 }
 
+// collectArtifactPathsByMajor returns sorted tag-relative artifact paths for the given runtime/major.
+func collectArtifactPathsByMajor(runtime RuntimeModel, major int) []string {
+	paths := make(map[string]struct{})
+
+	for _, platform := range runtime.Platforms {
+		for _, version := range platform.Versions {
+			if version.Major != major {
+				continue
+			}
+
+			for _, release := range version.Releases {
+				for _, artifact := range release.Artifacts {
+					if artifact.Binary == nil || release.ReleaseTag == "" {
+						continue
+					}
+					path := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
+					paths[path] = struct{}{}
+				}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(paths))
+	for path := range paths {
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result
+}
+
 // renderSimpleRootIndex renders /simple/index.html listing all runtimes.
 func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logger) error {
 	// Extract runtime names
@@ -234,4 +278,3 @@ func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logg
 	logger.Info("rendered simple root index", "path", path, "runtimes", len(runtimeNames))
 	return nil
 }
-
