@@ -2,6 +2,8 @@ name: Download Runtimes
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # Run daily at 2:00 AM UTC
 
 permissions:
   contents: write    # For GitHub Releases
