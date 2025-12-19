@@ -908,17 +908,17 @@ func TestRenderSimpleIndex(t *testing.T) {
 		t.Fatalf("Expected %s to exist: %v", jsonPath, err)
 	}
 
-	var entries []string
-	if err := json.Unmarshal(content, &entries); err != nil {
+	var index SimpleVersionIndex
+	if err := json.Unmarshal(content, &index); err != nil {
 		t.Fatalf("Failed to parse JSON artifact index: %v", err)
 	}
 
-	expected := []string{"nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz"}
-	if len(entries) != len(expected) {
-		t.Fatalf("JSON artifact index length = %d, want %d", len(entries), len(expected))
+	if len(index["linux"]) != 1 {
+		t.Fatalf("JSON artifact index for linux length = %d, want 1", len(index["linux"]))
 	}
-	if entries[0] != expected[0] {
-		t.Errorf("JSON artifact entry = %q, want %q", entries[0], expected[0])
+	expected := "nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz"
+	if index["linux"][0].Binary != expected {
+		t.Errorf("JSON artifact entry = %q, want %q", index["linux"][0].Binary, expected)
 	}
 
 	// Verify consolidated root JSON index exists
@@ -928,16 +928,16 @@ func TestRenderSimpleIndex(t *testing.T) {
 		t.Fatalf("Expected %s to exist: %v", rootJSONPath, err)
 	}
 
-	var rootEntries []string
-	if err := json.Unmarshal(rootContent, &rootEntries); err != nil {
+	var rootIndex SimpleRootIndex
+	if err := json.Unmarshal(rootContent, &rootIndex); err != nil {
 		t.Fatalf("Failed to parse consolidated JSON index: %v", err)
 	}
 
-	if len(rootEntries) != len(expected) {
-		t.Fatalf("Consolidated JSON index length = %d, want %d", len(rootEntries), len(expected))
+	if len(rootIndex["linux"]) != 1 {
+		t.Fatalf("Consolidated JSON index for linux length = %d, want 1", len(rootIndex["linux"]))
 	}
-	if rootEntries[0] != expected[0] {
-		t.Errorf("Consolidated JSON entry = %q, want %q", rootEntries[0], expected[0])
+	if rootIndex["linux"][0].Binary != expected {
+		t.Errorf("Consolidated JSON entry = %q, want %q", rootIndex["linux"][0].Binary, expected)
 	}
 }
 
@@ -1018,11 +1018,11 @@ func TestCollectDistributionsFromVersion(t *testing.T) {
 	}
 }
 
-func TestCollectAllArtifactPaths(t *testing.T) {
+func TestCollectAllArtifactIndex(t *testing.T) {
 	tests := []struct {
 		name     string
 		model    *SiteModel
-		expected []string
+		expected map[string][]string
 	}{
 		{
 			name: "single runtime with multiple versions",
@@ -1070,9 +1070,11 @@ func TestCollectAllArtifactPaths(t *testing.T) {
 					},
 				},
 			},
-			expected: []string{
-				"nodejs-v20.11.0/node-v20.11.0-linux-x64.tar.xz",
-				"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz",
+			expected: map[string][]string{
+				"linux": {
+					"nodejs-v20.11.0/node-v20.11.0-linux-x64.tar.xz",
+					"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz",
+				},
 			},
 		},
 		{
@@ -1131,9 +1133,11 @@ func TestCollectAllArtifactPaths(t *testing.T) {
 					},
 				},
 			},
-			expected: []string{
-				"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz",
-				"python-v3.13.0/python-3.13.0-linux-x64.tar.gz",
+			expected: map[string][]string{
+				"linux": {
+					"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz",
+					"python-v3.13.0/python-3.13.0-linux-x64.tar.gz",
+				},
 			},
 		},
 		{
@@ -1141,86 +1145,27 @@ func TestCollectAllArtifactPaths(t *testing.T) {
 			model: &SiteModel{
 				Runtimes: []RuntimeModel{},
 			},
-			expected: []string{},
-		},
-		{
-			name: "release without tag skipped",
-			model: &SiteModel{
-				Runtimes: []RuntimeModel{
-					{
-						Name: "nodejs",
-						Platforms: []PlatformModel{
-							{
-								OS: "linux",
-								Versions: []VersionModel{
-									{
-										Major: 22,
-										Releases: []ReleaseModel{
-											{
-												ReleaseTag: "",
-												Artifacts: []ArtifactModel{
-													{
-														Binary: &FileModel{
-															Filename: "node-v22.15.0-linux-x64.tar.xz",
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expected: []string{},
-		},
-		{
-			name: "artifact without binary skipped",
-			model: &SiteModel{
-				Runtimes: []RuntimeModel{
-					{
-						Name: "nodejs",
-						Platforms: []PlatformModel{
-							{
-								OS: "linux",
-								Versions: []VersionModel{
-									{
-										Major: 22,
-										Releases: []ReleaseModel{
-											{
-												ReleaseTag: "nodejs-v22.15.0",
-												Artifacts: []ArtifactModel{
-													{
-														Binary: nil,
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expected: []string{},
+			expected: map[string][]string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := collectAllArtifactPaths(tt.model)
+			result := collectAllArtifactIndex(tt.model)
 
 			if len(result) != len(tt.expected) {
-				t.Errorf("collectAllArtifactPaths() length = %d, want %d", len(result), len(tt.expected))
-				return
+				t.Errorf("collectAllArtifactIndex() OS count = %d, want %d", len(result), len(tt.expected))
 			}
 
-			for i, path := range result {
-				if path != tt.expected[i] {
-					t.Errorf("collectAllArtifactPaths()[%d] = %q, want %q", i, path, tt.expected[i])
+			for os, expectedPaths := range tt.expected {
+				if len(result[os]) != len(expectedPaths) {
+					t.Errorf("collectAllArtifactIndex() paths for %s = %d, want %d", os, len(result[os]), len(expectedPaths))
+					continue
+				}
+				for i, entry := range result[os] {
+					if entry.Binary != expectedPaths[i] {
+						t.Errorf("collectAllArtifactIndex() [%s][%d] = %q, want %q", os, i, entry.Binary, expectedPaths[i])
+					}
 				}
 			}
 		})
@@ -1271,12 +1216,12 @@ func TestRenderSimpleIndex_EmptyModel(t *testing.T) {
 		t.Fatalf("Expected %s to exist: %v", rootJSONPath, err)
 	}
 
-	var rootEntries []string
-	if err := json.Unmarshal(rootContent, &rootEntries); err != nil {
+	var rootIndex SimpleRootIndex
+	if err := json.Unmarshal(rootContent, &rootIndex); err != nil {
 		t.Fatalf("Failed to parse consolidated JSON index: %v", err)
 	}
 
-	if len(rootEntries) != 0 {
-		t.Errorf("Consolidated JSON index length = %d, want 0 for empty model", len(rootEntries))
+	if len(rootIndex) != 0 {
+		t.Errorf("Consolidated JSON index OS count = %d, want 0 for empty model", len(rootIndex))
 	}
 }

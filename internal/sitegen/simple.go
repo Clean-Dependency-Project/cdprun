@@ -10,11 +10,21 @@ import (
 	"log/slog"
 )
 
+// SimpleArtifactEntry represents a single artifact in the JSON index.
+type SimpleArtifactEntry struct {
+	Platform string `json:"platform"`
+	Binary   string `json:"binary"`
+	SHA256   string `json:"sha256,omitempty"`
+	Audit    string `json:"audit,omitempty"`
+}
+
+// SimpleVersionIndex represents a version-specific JSON index nested by OS.
+type SimpleVersionIndex map[string][]SimpleArtifactEntry
+
+// SimpleRootIndex represents the root JSON index nested by OS.
+type SimpleRootIndex map[string][]SimpleArtifactEntry
+
 // RenderSimpleIndex generates hierarchical Simple index pages.
-// Creates: /simple/index.html (runtimes)
-//
-//	/simple/<runtime>/index.html (versions)
-//	/simple/<runtime>/v<major>/index.html (binaries)
 func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) error {
 	simpleDir := filepath.Join(outDir, "simple")
 
@@ -151,8 +161,8 @@ func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logge
 	}
 
 	// Also render JSON index for automation tooling (e.g., Nexus proxy discovery)
-	artifactPaths := collectArtifactPathsByMajor(runtime, major)
-	jsonData, err := json.MarshalIndent(artifactPaths, "", "  ")
+	artifactIndex := collectArtifactIndexByMajor(runtime, major)
+	jsonData, err := json.MarshalIndent(artifactIndex, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize artifact index: %w", err)
 	}
@@ -162,8 +172,50 @@ func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logge
 		return fmt.Errorf("failed to write version JSON index: %w", err)
 	}
 
-	logger.Debug("rendered version page", "runtime", runtime.Name, "major", major, "distributions", len(distributions), "artifact_paths", len(artifactPaths))
+	logger.Debug("rendered version page", "runtime", runtime.Name, "major", major, "distributions", len(distributions), "artifact_entries", len(artifactIndex))
 	return nil
+}
+
+// collectArtifactIndexByMajor returns nested artifact index for the given runtime/major.
+func collectArtifactIndexByMajor(runtime RuntimeModel, major int) SimpleVersionIndex {
+	index := make(SimpleVersionIndex)
+
+	for _, platform := range runtime.Platforms {
+		os := normalizeOS(platform.OS)
+		for _, version := range platform.Versions {
+			if version.Major != major {
+				continue
+			}
+
+			for _, release := range version.Releases {
+				for _, artifact := range release.Artifacts {
+					if artifact.Binary == nil || release.ReleaseTag == "" {
+						continue
+					}
+
+					entry := SimpleArtifactEntry{
+						Platform: artifact.Platform,
+						Binary:   fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename),
+						SHA256:   artifact.Binary.SHA256,
+					}
+					if artifact.Audit != nil {
+						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
+					}
+
+					index[os] = append(index[os], entry)
+				}
+			}
+		}
+	}
+
+	// Sort entries within each OS for determinism
+	for os := range index {
+		sort.Slice(index[os], func(i, j int) bool {
+			return index[os][i].Binary < index[os][j].Binary
+		})
+	}
+
+	return index
 }
 
 // collectDistributionsFromVersion collects all distributions from a version model.
@@ -221,36 +273,6 @@ func collectDistributionsFromVersion(version VersionModel, distMap map[string]Di
 	}
 }
 
-// collectArtifactPathsByMajor returns sorted tag-relative artifact paths for the given runtime/major.
-func collectArtifactPathsByMajor(runtime RuntimeModel, major int) []string {
-	paths := make(map[string]struct{})
-
-	for _, platform := range runtime.Platforms {
-		for _, version := range platform.Versions {
-			if version.Major != major {
-				continue
-			}
-
-			for _, release := range version.Releases {
-				for _, artifact := range release.Artifacts {
-					if artifact.Binary == nil || release.ReleaseTag == "" {
-						continue
-					}
-					path := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
-					paths[path] = struct{}{}
-				}
-			}
-		}
-	}
-
-	result := make([]string, 0, len(paths))
-	for path := range paths {
-		result = append(result, path)
-	}
-	sort.Strings(result)
-	return result
-}
-
 // renderSimpleRootIndex renders /simple/index.html listing all runtimes.
 func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logger) error {
 	// Extract runtime names
@@ -276,8 +298,8 @@ func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logg
 	}
 
 	// Also render consolidated JSON index with all artifact paths across all runtimes
-	allPaths := collectAllArtifactPaths(model)
-	jsonData, err := json.MarshalIndent(allPaths, "", "  ")
+	allIndex := collectAllArtifactIndex(model)
+	jsonData, err := json.MarshalIndent(allIndex, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize consolidated artifact index: %w", err)
 	}
@@ -287,52 +309,56 @@ func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logg
 		return fmt.Errorf("failed to write consolidated JSON index: %w", err)
 	}
 
-	logger.Info("rendered simple root index", "path", path, "runtimes", len(runtimeNames), "total_artifacts", len(allPaths))
+	logger.Info("rendered simple root index", "path", path, "runtimes", len(runtimeNames), "total_os_groups", len(allIndex))
 	return nil
 }
 
-// collectAllArtifactPaths returns all artifact paths across all runtimes in the model.
-func collectAllArtifactPaths(model *SiteModel) []string {
-	paths := make(map[string]struct{})
+// collectAllArtifactIndex returns nested artifact index across all runtimes in the model.
+func collectAllArtifactIndex(model *SiteModel) SimpleRootIndex {
+	index := make(SimpleRootIndex)
+	seen := make(map[string]bool)
 
 	for _, runtime := range model.Runtimes {
-		collectRuntimeArtifacts(runtime, paths)
-	}
+		for _, platform := range runtime.Platforms {
+			os := normalizeOS(platform.OS)
+			for _, version := range platform.Versions {
+				for _, release := range version.Releases {
+					if release.ReleaseTag == "" {
+						continue
+					}
+					for _, artifact := range release.Artifacts {
+						if artifact.Binary == nil {
+							continue
+						}
 
-	result := make([]string, 0, len(paths))
-	for path := range paths {
-		result = append(result, path)
-	}
-	sort.Strings(result)
-	return result
-}
+						binaryPath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
+						if seen[binaryPath] {
+							continue
+						}
+						seen[binaryPath] = true
 
-// collectRuntimeArtifacts extracts artifact paths from a single runtime into the provided map.
-func collectRuntimeArtifacts(runtime RuntimeModel, paths map[string]struct{}) {
-	for _, platform := range runtime.Platforms {
-		for _, version := range platform.Versions {
-			collectVersionArtifacts(version, paths)
+						entry := SimpleArtifactEntry{
+							Platform: artifact.Platform,
+							Binary:   binaryPath,
+							SHA256:   artifact.Binary.SHA256,
+						}
+						if artifact.Audit != nil {
+							entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
+						}
+
+						index[os] = append(index[os], entry)
+					}
+				}
+			}
 		}
 	}
-}
 
-// collectVersionArtifacts extracts artifact paths from a version's releases.
-func collectVersionArtifacts(version VersionModel, paths map[string]struct{}) {
-	for _, release := range version.Releases {
-		if release.ReleaseTag == "" {
-			continue
-		}
-		collectReleaseArtifacts(release, paths)
+	// Sort entries within each OS for determinism
+	for os := range index {
+		sort.Slice(index[os], func(i, j int) bool {
+			return index[os][i].Binary < index[os][j].Binary
+		})
 	}
-}
 
-// collectReleaseArtifacts extracts binary artifact paths from a single release.
-func collectReleaseArtifacts(release ReleaseModel, paths map[string]struct{}) {
-	for _, artifact := range release.Artifacts {
-		if artifact.Binary == nil {
-			continue
-		}
-		path := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
-		paths[path] = struct{}{}
-	}
+	return index
 }
