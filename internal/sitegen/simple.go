@@ -16,6 +16,7 @@ type SimpleArtifactEntry struct {
 	Binary   string `json:"binary"`
 	SHA256   string `json:"sha256,omitempty"`
 	Audit    string `json:"audit,omitempty"`
+	Version  string `json:"version"`
 }
 
 // SimpleVersionIndex represents a version-specific JSON index nested by OS.
@@ -55,6 +56,18 @@ func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *sl
 		return err
 	}
 
+	// Render runtime-level JSON index containing all versions for this runtime
+	runtimeIndex := collectRuntimeArtifactIndex(runtime)
+	jsonData, err := json.MarshalIndent(runtimeIndex, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize runtime artifact index: %w", err)
+	}
+
+	jsonPath := filepath.Join(runtimeDir, "index.json")
+	if err := writeFileIfChanged(jsonPath, jsonData, logger); err != nil {
+		return fmt.Errorf("failed to write runtime JSON index: %w", err)
+	}
+
 	// Render version pages for each major version
 	for _, major := range majorVersions {
 		if err := renderVersionPage(runtime, major, runtimeDir, logger); err != nil {
@@ -62,6 +75,7 @@ func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *sl
 		}
 	}
 
+	logger.Debug("rendered runtime pages", "runtime", runtime.Name, "major_versions", len(majorVersions), "os_groups", len(runtimeIndex))
 	return nil
 }
 
@@ -197,6 +211,56 @@ func collectArtifactIndexByMajor(runtime RuntimeModel, major int) SimpleVersionI
 						Platform: artifact.Platform,
 						Binary:   fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename),
 						SHA256:   artifact.Binary.SHA256,
+						Version:  version.Version,
+					}
+					if artifact.Audit != nil {
+						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
+					}
+
+					index[os] = append(index[os], entry)
+				}
+			}
+		}
+	}
+
+	// Sort entries within each OS for determinism
+	for os := range index {
+		sort.Slice(index[os], func(i, j int) bool {
+			return index[os][i].Binary < index[os][j].Binary
+		})
+	}
+
+	return index
+}
+
+// collectRuntimeArtifactIndex returns nested artifact index for a single runtime across all versions.
+func collectRuntimeArtifactIndex(runtime RuntimeModel) SimpleRootIndex {
+	index := make(SimpleRootIndex)
+	seen := make(map[string]bool)
+
+	for _, platform := range runtime.Platforms {
+		os := normalizeOS(platform.OS)
+		for _, version := range platform.Versions {
+			for _, release := range version.Releases {
+				if release.ReleaseTag == "" {
+					continue
+				}
+				for _, artifact := range release.Artifacts {
+					if artifact.Binary == nil {
+						continue
+					}
+
+					binaryPath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
+					if seen[binaryPath] {
+						continue
+					}
+					seen[binaryPath] = true
+
+					entry := SimpleArtifactEntry{
+						Platform: artifact.Platform,
+						Binary:   binaryPath,
+						SHA256:   artifact.Binary.SHA256,
+						Version:  version.Version,
 					}
 					if artifact.Audit != nil {
 						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
@@ -341,6 +405,7 @@ func collectAllArtifactIndex(model *SiteModel) SimpleRootIndex {
 							Platform: artifact.Platform,
 							Binary:   binaryPath,
 							SHA256:   artifact.Binary.SHA256,
+							Version:  version.Version,
 						}
 						if artifact.Audit != nil {
 							entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)

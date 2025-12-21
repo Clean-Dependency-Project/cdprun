@@ -920,6 +920,28 @@ func TestRenderSimpleIndex(t *testing.T) {
 	if index["linux"][0].Binary != expected {
 		t.Errorf("JSON artifact entry = %q, want %q", index["linux"][0].Binary, expected)
 	}
+	if index["linux"][0].Version != "22.15.0" {
+		t.Errorf("JSON artifact version = %q, want %q", index["linux"][0].Version, "22.15.0")
+	}
+
+	// Verify runtime-specific JSON index exists
+	runtimeJSONPath := filepath.Join(nodejsDir, "index.json")
+	runtimeContent, err := os.ReadFile(runtimeJSONPath)
+	if err != nil {
+		t.Fatalf("Expected %s to exist: %v", runtimeJSONPath, err)
+	}
+
+	var runtimeIndex SimpleRootIndex
+	if err := json.Unmarshal(runtimeContent, &runtimeIndex); err != nil {
+		t.Fatalf("Failed to parse runtime JSON index: %v", err)
+	}
+
+	if len(runtimeIndex["linux"]) != 1 {
+		t.Fatalf("Runtime JSON index for linux length = %d, want 1", len(runtimeIndex["linux"]))
+	}
+	if runtimeIndex["linux"][0].Version != "22.15.0" {
+		t.Errorf("Runtime JSON artifact version = %q, want %q", runtimeIndex["linux"][0].Version, "22.15.0")
+	}
 
 	// Verify consolidated root JSON index exists
 	rootJSONPath := filepath.Join(tempDir, "simple", "index.json")
@@ -938,6 +960,9 @@ func TestRenderSimpleIndex(t *testing.T) {
 	}
 	if rootIndex["linux"][0].Binary != expected {
 		t.Errorf("Consolidated JSON entry = %q, want %q", rootIndex["linux"][0].Binary, expected)
+	}
+	if rootIndex["linux"][0].Version != "22.15.0" {
+		t.Errorf("Consolidated JSON artifact version = %q, want %q", rootIndex["linux"][0].Version, "22.15.0")
 	}
 }
 
@@ -1022,7 +1047,10 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 	tests := []struct {
 		name     string
 		model    *SiteModel
-		expected map[string][]string
+		expected map[string][]struct {
+			path    string
+			version string
+		}
 	}{
 		{
 			name: "single runtime with multiple versions",
@@ -1035,7 +1063,8 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 								OS: "linux",
 								Versions: []VersionModel{
 									{
-										Major: 22,
+										Major:   22,
+										Version: "22.15.0",
 										Releases: []ReleaseModel{
 											{
 												ReleaseTag: "nodejs-v22.15.0",
@@ -1050,7 +1079,8 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 										},
 									},
 									{
-										Major: 20,
+										Major:   20,
+										Version: "20.11.0",
 										Releases: []ReleaseModel{
 											{
 												ReleaseTag: "nodejs-v20.11.0",
@@ -1070,10 +1100,13 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 					},
 				},
 			},
-			expected: map[string][]string{
+			expected: map[string][]struct {
+				path    string
+				version string
+			}{
 				"linux": {
-					"nodejs-v20.11.0/node-v20.11.0-linux-x64.tar.xz",
-					"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz",
+					{"nodejs-v20.11.0/node-v20.11.0-linux-x64.tar.xz", "20.11.0"},
+					{"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz", "22.15.0"},
 				},
 			},
 		},
@@ -1088,7 +1121,8 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 								OS: "linux",
 								Versions: []VersionModel{
 									{
-										Major: 22,
+										Major:   22,
+										Version: "22.15.0",
 										Releases: []ReleaseModel{
 											{
 												ReleaseTag: "nodejs-v22.15.0",
@@ -1113,7 +1147,8 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 								OS: "linux",
 								Versions: []VersionModel{
 									{
-										Major: 3,
+										Major:   3,
+										Version: "3.13.0",
 										Releases: []ReleaseModel{
 											{
 												ReleaseTag: "python-v3.13.0",
@@ -1133,10 +1168,13 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 					},
 				},
 			},
-			expected: map[string][]string{
+			expected: map[string][]struct {
+				path    string
+				version string
+			}{
 				"linux": {
-					"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz",
-					"python-v3.13.0/python-3.13.0-linux-x64.tar.gz",
+					{"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz", "22.15.0"},
+					{"python-v3.13.0/python-3.13.0-linux-x64.tar.gz", "3.13.0"},
 				},
 			},
 		},
@@ -1145,7 +1183,10 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 			model: &SiteModel{
 				Runtimes: []RuntimeModel{},
 			},
-			expected: map[string][]string{},
+			expected: map[string][]struct {
+				path    string
+				version string
+			}{},
 		},
 	}
 
@@ -1157,14 +1198,17 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 				t.Errorf("collectAllArtifactIndex() OS count = %d, want %d", len(result), len(tt.expected))
 			}
 
-			for os, expectedPaths := range tt.expected {
-				if len(result[os]) != len(expectedPaths) {
-					t.Errorf("collectAllArtifactIndex() paths for %s = %d, want %d", os, len(result[os]), len(expectedPaths))
+			for os, expectedEntries := range tt.expected {
+				if len(result[os]) != len(expectedEntries) {
+					t.Errorf("collectAllArtifactIndex() paths for %s = %d, want %d", os, len(result[os]), len(expectedEntries))
 					continue
 				}
 				for i, entry := range result[os] {
-					if entry.Binary != expectedPaths[i] {
-						t.Errorf("collectAllArtifactIndex() [%s][%d] = %q, want %q", os, i, entry.Binary, expectedPaths[i])
+					if entry.Binary != expectedEntries[i].path {
+						t.Errorf("collectAllArtifactIndex() [%s][%d] path = %q, want %q", os, i, entry.Binary, expectedEntries[i].path)
+					}
+					if entry.Version != expectedEntries[i].version {
+						t.Errorf("collectAllArtifactIndex() [%s][%d] version = %q, want %q", os, i, entry.Version, expectedEntries[i].version)
 					}
 				}
 			}
