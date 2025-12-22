@@ -2,14 +2,14 @@ package nodejs
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"crypto/sha256"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
 	"github.com/clean-dependency-project/cdprun/internal/endoflife"
@@ -19,8 +19,9 @@ import (
 
 // mockEndOfLifeClient implements endoflife.Client for testing
 type mockEndOfLifeClient struct {
-	productInfo *endoflife.ProductInfo
-	shouldError bool
+	productInfo        *endoflife.ProductInfo
+	maintainedReleases []endoflife.VersionInfo
+	shouldError        bool
 }
 
 func (m *mockEndOfLifeClient) GetProductInfo(ctx context.Context, product string) (*endoflife.ProductInfo, error) {
@@ -76,6 +77,13 @@ func (m *mockEndOfLifeClient) EnrichVersionInfo(ctx context.Context, runtime end
 		Version:     policyVersion.Version,
 		IsSupported: policyVersion.Supported,
 	}, nil
+}
+
+func (m *mockEndOfLifeClient) GetMaintainedReleases(ctx context.Context, product string) ([]endoflife.VersionInfo, error) {
+	if m.shouldError {
+		return nil, fmt.Errorf("mock error")
+	}
+	return m.maintainedReleases, nil
 }
 
 func createTestNodeJSPolicyFile(t *testing.T) string {
@@ -175,6 +183,88 @@ func TestNodeJSAdapter_GetEndOfLifeProduct(t *testing.T) {
 
 	if product != "nodejs" {
 		t.Errorf("GetEndOfLifeProduct() = %s, want nodejs", product)
+	}
+}
+
+func TestNodeJSAdapter_GetMaintainedVersions(t *testing.T) {
+	ctx := context.Background()
+	maintained := []endoflife.VersionInfo{
+		{Version: "22", LatestPatch: "22.21.1", IsMaintained: true},
+		{Version: "20", LatestPatch: "20.19.5", IsMaintained: true},
+	}
+	mockClient := &mockEndOfLifeClient{
+		maintainedReleases: maintained,
+	}
+	adapter := NewAdapter(mockClient)
+
+	versions, err := adapter.GetMaintainedVersions(ctx)
+	if err != nil {
+		t.Fatalf("GetMaintainedVersions() unexpected error: %v", err)
+	}
+
+	if len(versions) != 2 {
+		t.Errorf("GetMaintainedVersions() len = %v, want 2", len(versions))
+	}
+
+	if versions[0].Version != "22" || versions[1].Version != "20" {
+		t.Errorf("GetMaintainedVersions() returned wrong versions: %v, %v", versions[0].Version, versions[1].Version)
+	}
+}
+
+func TestNodeJSAdapter_GetMaintainedVersions_Error(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &mockEndOfLifeClient{
+		shouldError: true,
+	}
+	adapter := NewAdapter(mockClient)
+
+	_, err := adapter.GetMaintainedVersions(ctx)
+	if err == nil {
+		t.Fatal("GetMaintainedVersions() expected error, got nil")
+	}
+}
+
+func TestNodeJSAdapter_GetMaintainedVersions_NilClient(t *testing.T) {
+	// Test that a nil endoflife client returns an error instead of panicking
+	ctx := context.Background()
+	adapter := &NodeJSAdapter{
+		endoflifeClient: nil,
+		stdout:          slog.Default(),
+		stderr:          slog.Default(),
+	}
+
+	_, err := adapter.GetMaintainedVersions(ctx)
+	if err == nil {
+		t.Fatal("GetMaintainedVersions() with nil client expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "endoflife client is not initialized") {
+		t.Errorf("GetMaintainedVersions() error = %v, want error containing 'endoflife client is not initialized'", err)
+	}
+}
+
+func TestNewAdapterWithConfig_NilLoggers(t *testing.T) {
+	// Test that nil loggers are handled gracefully without panicking
+	mockClient := &mockEndOfLifeClient{}
+	cfg := &config.Runtime{Name: "nodejs"}
+
+	// This should not panic even with nil loggers
+	adapter := NewAdapterWithConfig(mockClient, cfg, nil, nil, nil)
+
+	if adapter == nil {
+		t.Error("NewAdapterWithConfig with nil loggers returned nil")
+	}
+
+	nodejsAdapter, ok := adapter.(*NodeJSAdapter)
+	if !ok {
+		t.Error("NewAdapterWithConfig did not return a NodeJSAdapter")
+	}
+
+	// Verify loggers are set to defaults
+	if nodejsAdapter.stdout == nil {
+		t.Error("NewAdapterWithConfig should set stdout to default logger when nil")
+	}
+	if nodejsAdapter.stderr == nil {
+		t.Error("NewAdapterWithConfig should set stderr to default logger when nil")
 	}
 }
 

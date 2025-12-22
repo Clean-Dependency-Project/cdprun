@@ -113,6 +113,13 @@ func (m *mockRuntimeProvider) ApplyPolicy(versions []endoflife.VersionInfo, poli
 	return filtered, nil
 }
 
+func (m *mockRuntimeProvider) GetMaintainedVersions(ctx context.Context) ([]endoflife.VersionInfo, error) {
+	if m.shouldError {
+		return nil, fmt.Errorf("mock error")
+	}
+	return m.versions, nil
+}
+
 // mockVerificationStrategy implements VerificationStrategy for testing
 type mockVerificationStrategy struct {
 	strategyType string

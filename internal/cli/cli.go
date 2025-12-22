@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -346,39 +347,55 @@ func downloadSingleRuntime(c *cli.Context, manager *runtime.Manager, cfg *config
 	var versionsToDownload []runtime.VersionInfo
 
 	if version == "" {
-		// No version specified - download all supported versions from policy
-		stdout.Info("no version specified, downloading all supported versions from policy", "runtime", runtimeName)
-
-		// Get all versions from endoflife.date API
-		allVersions, err := manager.ListVersions(context.Background(), runtimeName)
-		if err != nil {
-			stderr.Error("failed to list versions", "runtime", runtimeName, "error", err)
-			return fmt.Errorf("failed to list versions: %w", err)
-		}
-		stdout.Info("retrieved versions from endoflife.date", "runtime", runtimeName, "version_count", len(allVersions))
-
-		// Load policy file
-		policyVersions, err := provider.LoadPolicy(runtimeConfig.PolicyFile)
-		if err != nil {
-			stderr.Error("failed to load policy", "policy_file", runtimeConfig.PolicyFile, "error", err)
-			return fmt.Errorf("failed to load policy: %w", err)
-		}
-		stdout.Info("loaded policy file", "policy_file", runtimeConfig.PolicyFile, "policy_version_count", len(policyVersions))
-
-		// Apply policy to filter supported versions
-		supportedVersions, err := provider.ApplyPolicy(allVersions, policyVersions)
-		if err != nil {
-			stderr.Error("failed to apply policy", "error", err)
-			return fmt.Errorf("failed to apply policy: %w", err)
-		}
-		stdout.Info("filtered by policy", "supported_count", len(supportedVersions))
-
-		if len(supportedVersions) == 0 {
-			stderr.Warn("no supported versions found in policy")
-			return fmt.Errorf("no supported versions found in policy")
+		// No version specified - try policy file first, then fallback to API
+		policyFilePath := runtimeConfig.PolicyFile
+		if policyFilePath == "" {
+			policyFilePath = filepath.Join("policies", runtimeName+"-policy.json")
 		}
 
-		versionsToDownload = supportedVersions
+		if _, err := os.Stat(policyFilePath); err == nil {
+			stdout.Info("found policy file, using it for version discovery", "path", policyFilePath)
+
+			// Get all versions from endoflife.date API
+			allVersions, err := manager.ListVersions(context.Background(), runtimeName)
+			if err != nil {
+				stderr.Error("failed to list versions", "runtime", runtimeName, "error", err)
+				return fmt.Errorf("failed to list versions: %w", err)
+			}
+			stdout.Info("retrieved versions from endoflife.date", "runtime", runtimeName, "version_count", len(allVersions))
+
+			// Load policy file
+			policyVersions, err := provider.LoadPolicy(policyFilePath)
+			if err != nil {
+				stderr.Error("failed to load policy", "policy_file", policyFilePath, "error", err)
+				return fmt.Errorf("failed to load policy: %w", err)
+			}
+			stdout.Info("loaded policy file", "policy_file", policyFilePath, "policy_version_count", len(policyVersions))
+
+			// Apply policy to filter supported versions
+			supportedVersions, err := provider.ApplyPolicy(allVersions, policyVersions)
+			if err != nil {
+				stderr.Error("failed to apply policy", "error", err)
+				return fmt.Errorf("failed to apply policy: %w", err)
+			}
+			stdout.Info("filtered by policy", "supported_count", len(supportedVersions))
+
+			versionsToDownload = supportedVersions
+		} else {
+			// No policy file - use endoflife.date API
+			stdout.Info("no policy file found, using endoflife.date API for version discovery", "runtime", runtimeName)
+			versionsToDownload, err = provider.GetMaintainedVersions(context.Background())
+			if err != nil {
+				stderr.Error("failed to get maintained versions", "runtime", runtimeName, "error", err)
+				return fmt.Errorf("failed to get maintained versions: %w", err)
+			}
+			stdout.Info("discovered maintained versions from API", "count", len(versionsToDownload))
+		}
+
+		if len(versionsToDownload) == 0 {
+			stderr.Warn("no supported versions found")
+			return fmt.Errorf("no supported versions found")
+		}
 	} else {
 		// Specific version requested
 		exactMatch := c.Bool("exact")

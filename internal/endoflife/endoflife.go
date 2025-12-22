@@ -238,6 +238,9 @@ type Client interface {
 
 	// EnrichVersionInfo enriches policy versions with API data
 	EnrichVersionInfo(ctx context.Context, runtime PolicyRuntime, policyVersion PolicyVersion) (*VersionInfo, error)
+
+	// GetMaintainedReleases returns all non-EOL releases for a product
+	GetMaintainedReleases(ctx context.Context, product string) ([]VersionInfo, error)
 }
 
 // HTTPClient defines the interface for HTTP operations
@@ -558,6 +561,44 @@ func (c *client) EnrichVersionInfo(ctx context.Context, runtime PolicyRuntime, p
 	}
 
 	return versionInfo, nil
+}
+
+// GetMaintainedReleases returns all non-EOL releases for a product
+// Includes maintained and security-only (EOAS) versions
+func (c *client) GetMaintainedReleases(ctx context.Context, product string) ([]VersionInfo, error) {
+	productInfo, err := c.GetProductInfo(ctx, product)
+	if err != nil {
+		return nil, err
+	}
+
+	var versions []VersionInfo
+	for _, release := range productInfo.Result.Releases {
+		if !release.IsEOL && (release.IsMaintained || isEOAS(release)) {
+			versions = append(versions, VersionInfo{
+				Version:      release.Name,
+				LatestPatch:  release.Latest.Name,
+				IsLTS:        release.IsLTS,
+				IsEOL:        release.IsEOL,
+				IsEOAS:       isEOAS(release),
+				IsMaintained: release.IsMaintained,
+				EOLDate:      getEOLDate(release),
+				ReleaseDate:  release.ReleaseDate,
+				RuntimeName:  product,
+			})
+		}
+	}
+	return versions, nil
+}
+
+func isEOAS(release Release) bool {
+	return release.IsEOAS || (release.EOASFrom != nil && *release.EOASFrom != "")
+}
+
+func getEOLDate(release Release) string {
+	if release.EOLFrom != nil {
+		return *release.EOLFrom
+	}
+	return ""
 }
 
 // PolicyLoader defines the interface for loading policy configurations

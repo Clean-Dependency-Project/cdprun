@@ -133,6 +133,14 @@ func NewAdapter(eolClient endoflife.Client) runtime.RuntimeProvider {
 
 // NewAdapterWithConfig creates a new Node.js runtime adapter with configuration and loggers.
 func NewAdapterWithConfig(eolClient endoflife.Client, cfg *config.Runtime, globalCfg *config.GlobalConfig, stdout, stderr *slog.Logger) runtime.RuntimeProvider {
+	// Use default loggers if nil to prevent panics
+	if stdout == nil {
+		stdout = slog.Default()
+	}
+	if stderr == nil {
+		stderr = slog.Default()
+	}
+
 	// Parse timeout from global config, fallback to 30s if not available
 	timeout := 30 * time.Second
 	if globalCfg != nil {
@@ -208,14 +216,20 @@ func (a *NodeJSAdapter) ListVersions(ctx context.Context) ([]endoflife.VersionIn
 		"lts_version_count", len(ltsVersions))
 
 	// Get endoflife data for nodejs
-	productInfo, err := a.endoflifeClient.GetProductInfo(ctx, NodeJS)
-	if err != nil {
-		// Log error but continue with LTS data only
-		a.stderr.Warn("could not get endoflife data", "runtime", NodeJS, "error", err)
+	var productInfo *endoflife.ProductInfo
+	if a.endoflifeClient == nil {
+		a.stderr.Warn("endoflife client is not initialized, continuing with LTS data only", "runtime", NodeJS)
 	} else {
-		a.stdout.Debug("retrieved endoflife data",
-			"runtime", NodeJS,
-			"release_count", len(productInfo.Result.Releases))
+		var err error
+		productInfo, err = a.endoflifeClient.GetProductInfo(ctx, NodeJS)
+		if err != nil {
+			// Log error but continue with LTS data only
+			a.stderr.Warn("could not get endoflife data", "runtime", NodeJS, "error", err)
+		} else {
+			a.stdout.Debug("retrieved endoflife data",
+				"runtime", NodeJS,
+				"release_count", len(productInfo.Result.Releases))
+		}
 	}
 
 	// Convert Node.js releases to endoflife.VersionInfo
@@ -599,6 +613,14 @@ func (a *NodeJSAdapter) LoadPolicy(filePath string) ([]endoflife.PolicyVersion, 
 	return policy.Runtimes[0].Versions, nil
 }
 
+// GetMaintainedVersions returns all non-EOL versions from endoflife API
+func (a *NodeJSAdapter) GetMaintainedVersions(ctx context.Context) ([]endoflife.VersionInfo, error) {
+	if a.endoflifeClient == nil {
+		return nil, fmt.Errorf("endoflife client is not initialized")
+	}
+	return a.endoflifeClient.GetMaintainedReleases(ctx, a.GetEndOfLifeProduct())
+}
+
 // ApplyPolicy filters Node.js versions based on the provided policy configuration.
 func (a *NodeJSAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policyVersions []endoflife.PolicyVersion) ([]endoflife.VersionInfo, error) {
 	// Create lookup map for policy versions
@@ -829,15 +851,25 @@ func getNodeReleaseDate(release NodeRelease) string {
 
 // validateVersionPolicy checks if the version is supported or under_review according to the policy
 func (a *NodeJSAdapter) validateVersionPolicy(version endoflife.VersionInfo) error {
-	// Refuse download if policy file is not configured
-	if a.config == nil || a.config.PolicyFile == "" {
-		return fmt.Errorf("no policy file configured for Node.js runtime - downloads require explicit policy approval")
+	policyFilePath := ""
+	if a.config != nil && a.config.PolicyFile != "" {
+		policyFilePath = a.config.PolicyFile
+	} else {
+		policyFilePath = filepath.Join("policies", NodeJS+"-policy.json")
+	}
+
+	// If policy file doesn't exist, we allow the download (API-sourced versions are pre-validated)
+	if _, err := os.Stat(policyFilePath); os.IsNotExist(err) {
+		a.stdout.Debug("skipping policy validation - no policy file found",
+			"version", version.Version,
+			"expected_path", policyFilePath)
+		return nil
 	}
 
 	// Load policy file using the existing LoadPolicy method
-	policyVersions, err := a.LoadPolicy(a.config.PolicyFile)
+	policyVersions, err := a.LoadPolicy(policyFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to load policy file %s: %w", a.config.PolicyFile, err)
+		return fmt.Errorf("failed to load policy file %s: %w", policyFilePath, err)
 	}
 
 	// Check if the requested version is in the policy and is supported or under_review
@@ -863,7 +895,7 @@ func (a *NodeJSAdapter) validateVersionPolicy(version endoflife.VersionInfo) err
 	}
 
 	// If version not found in policy, reject the download
-	return fmt.Errorf("node.js version %s not found in policy file %s", version.Version, a.config.PolicyFile)
+	return fmt.Errorf("node.js version %s not found in policy file %s", version.Version, policyFilePath)
 }
 
 // NodeJSVerificationStrategy combines checksum and GPG verification for Node.js downloads
