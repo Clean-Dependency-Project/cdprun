@@ -1633,3 +1633,95 @@ func TestClient_GetProductInfo_WithHTTPTest(t *testing.T) {
 		})
 	}
 }
+
+func TestGetMaintainedReleases(t *testing.T) {
+	tests := []struct {
+		name     string
+		product  string
+		releases []Release
+		wantErr  bool
+		wantLen  int
+	}{
+		{
+			name:    "filters out EOL versions",
+			product: "nodejs",
+			releases: []Release{
+				{Name: "22", IsMaintained: true, IsEOL: false},
+				{Name: "20", IsMaintained: true, IsEOL: false},
+				{Name: "18", IsMaintained: false, IsEOL: true}, // excluded
+			},
+			wantLen: 2,
+		},
+		{
+			name:    "includes EOAS versions",
+			product: "nodejs",
+			releases: []Release{
+				{Name: "22", IsMaintained: true, IsEOL: false},
+				{Name: "18", IsMaintained: false, IsEOAS: true, IsEOL: false}, // included
+			},
+			wantLen: 2,
+		},
+		{
+			name:    "empty when all EOL",
+			product: "nodejs",
+			releases: []Release{
+				{Name: "16", IsMaintained: false, IsEOL: true},
+				{Name: "14", IsMaintained: false, IsEOL: true},
+			},
+			wantLen: 0,
+		},
+		{
+			name:     "handles empty releases",
+			product:  "nodejs",
+			releases: []Release{},
+			wantLen:  0,
+		},
+		{
+			name:    "handles API error",
+			product: "error",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.product == "error" {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				productInfo := ProductInfo{}
+				productInfo.Result.Name = tt.product
+				productInfo.Result.Releases = tt.releases
+				json.NewEncoder(w).Encode(productInfo)
+			}))
+			defer server.Close()
+
+			client := NewClient(Config{
+				BaseURL: server.URL,
+			})
+
+			versions, err := client.GetMaintainedReleases(context.Background(), tt.product)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetMaintainedReleases() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if len(versions) != tt.wantLen {
+				t.Errorf("GetMaintainedReleases() len = %v, want %v", len(versions), tt.wantLen)
+			}
+
+			for _, v := range versions {
+				if v.IsEOL {
+					t.Errorf("GetMaintainedReleases() returned EOL version: %v", v.Version)
+				}
+				if !v.IsMaintained && !v.IsEOAS {
+					t.Errorf("GetMaintainedReleases() returned neither maintained nor EOAS version: %v", v.Version)
+				}
+			}
+		})
+	}
+}

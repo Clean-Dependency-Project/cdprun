@@ -73,6 +73,27 @@ func (m *MockClient) EnrichVersionInfo(ctx context.Context, runtime PolicyRuntim
 	}, nil
 }
 
+func (m *MockClient) GetMaintainedReleases(ctx context.Context, product string) ([]VersionInfo, error) {
+	releases := generateMockReleases(product)
+	var versions []VersionInfo
+	for _, release := range releases {
+		if !release.IsEOL && (release.IsMaintained || isEOAS(release)) {
+			versions = append(versions, VersionInfo{
+				Version:      release.Name,
+				LatestPatch:  release.Latest.Name,
+				IsLTS:        release.IsLTS,
+				IsEOL:        release.IsEOL,
+				IsEOAS:       isEOAS(release),
+				IsMaintained: release.IsMaintained,
+				EOLDate:      getEOLDate(release),
+				ReleaseDate:  release.ReleaseDate,
+				RuntimeName:  product,
+			})
+		}
+	}
+	return versions, nil
+}
+
 func generateMockReleases(product string) []Release {
 	switch product {
 	case "python":

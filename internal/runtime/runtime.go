@@ -43,6 +43,10 @@ type RuntimeProvider interface {
 	// Policy operations using existing endoflife types
 	LoadPolicy(filePath string) ([]endoflife.PolicyVersion, error)
 	ApplyPolicy(versions []endoflife.VersionInfo, policy []endoflife.PolicyVersion) ([]endoflife.VersionInfo, error)
+
+	// GetMaintainedVersions returns all non-EOL versions from endoflife API
+	// Includes both actively maintained and security-only (EOAS) versions
+	GetMaintainedVersions(ctx context.Context) ([]endoflife.VersionInfo, error)
 }
 
 // VersionOptions provides options for version selection.
