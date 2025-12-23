@@ -466,6 +466,83 @@ func TestNodeJSAdapter_ApplyPolicy(t *testing.T) {
 	}
 }
 
+func TestNodeJSAdapter_ValidateVersionPolicy_ExplicitMissingFile(t *testing.T) {
+	// This test verifies that when a policy file is explicitly configured
+	// but doesn't exist, an error is returned (not silently skipped)
+	mockClient := &mockEndOfLifeClient{}
+	adapter := NewAdapter(mockClient)
+	nodejsAdapter := adapter.(*NodeJSAdapter)
+
+	// Set an explicit policy file path that does not exist
+	nodejsAdapter.SetConfig(&config.Runtime{
+		PolicyFile: "/nonexistent/explicit/policy.json",
+	})
+
+	version := endoflife.VersionInfo{Version: "22"}
+	err := nodejsAdapter.validateVersionPolicy(version)
+
+	if err == nil {
+		t.Fatal("validateVersionPolicy() should return error when explicit policy file is missing")
+	}
+	if !strings.Contains(err.Error(), "configured policy file does not exist") {
+		t.Errorf("validateVersionPolicy() error = %v, want error containing 'configured policy file does not exist'", err)
+	}
+}
+
+func TestNodeJSAdapter_ValidateVersionPolicy_DefaultMissingFileAllowed(t *testing.T) {
+	// This test verifies that when no policy file is configured and the default
+	// path doesn't exist, validation is skipped (returns nil)
+	mockClient := &mockEndOfLifeClient{}
+	adapter := NewAdapter(mockClient)
+	nodejsAdapter := adapter.(*NodeJSAdapter)
+
+	// Change to a temp directory where the default policy path won't exist
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	// No config set - will use default path which won't exist
+	nodejsAdapter.SetConfig(nil)
+
+	version := endoflife.VersionInfo{Version: "22"}
+	err := nodejsAdapter.validateVersionPolicy(version)
+
+	if err != nil {
+		t.Errorf("validateVersionPolicy() should allow download when default policy path is missing, got error: %v", err)
+	}
+}
+
+func TestNodeJSAdapter_ValidateVersionPolicy_ExplicitExistingFile(t *testing.T) {
+	// This test verifies that when a policy file is explicitly configured
+	// and exists, it is used for validation
+	policyVersions := []endoflife.PolicyVersion{
+		{Version: "22", Supported: true},
+	}
+	policyPath := createTestPolicyFileFromVersions(t, policyVersions)
+
+	mockClient := &mockEndOfLifeClient{}
+	adapter := NewAdapter(mockClient)
+	nodejsAdapter := adapter.(*NodeJSAdapter)
+	nodejsAdapter.SetConfig(&config.Runtime{
+		PolicyFile: policyPath,
+	})
+
+	// Version 22 should pass validation
+	version := endoflife.VersionInfo{Version: "22"}
+	err := nodejsAdapter.validateVersionPolicy(version)
+	if err != nil {
+		t.Errorf("validateVersionPolicy() should pass for supported version, got error: %v", err)
+	}
+
+	// Version 18 should fail (not in policy)
+	version = endoflife.VersionInfo{Version: "18"}
+	err = nodejsAdapter.validateVersionPolicy(version)
+	if err == nil {
+		t.Error("validateVersionPolicy() should fail for version not in policy")
+	}
+}
+
 func TestNodeJSAdapter_CreateDownloadTasks(t *testing.T) {
 	adapter := NewAdapter(&mockEndOfLifeClient{})
 
@@ -633,11 +710,11 @@ func TestNodeJSAdapter_ConstructDownloadURL(t *testing.T) {
 	adapter := NewAdapter(&mockEndOfLifeClient{}).(*NodeJSAdapter)
 
 	tests := []struct {
-		name            string
-		version         string
-		platform        platform.Platform
-		wantContains    string // Check if URL contains this substring instead of exact match
-		wantEmpty       bool
+		name         string
+		version      string
+		platform     platform.Platform
+		wantContains string // Check if URL contains this substring instead of exact match
+		wantEmpty    bool
 	}{
 		{
 			name:    "Linux x64",
@@ -1120,9 +1197,9 @@ func TestNodeJSVerificationStrategy_WithAuditFileCreation(t *testing.T) {
 
 	// Create a verification strategy
 	strategy := &NodeJSVerificationStrategy{
-		stdout:           nil,
-		stderr:           nil,
-		Logger:           nil,
+		stdout: nil,
+		stderr: nil,
+		Logger: nil,
 	}
 
 	result := createMockDownloadResult(t, tempDir)
@@ -1232,7 +1309,7 @@ func TestNewAdapterWithConfig(t *testing.T) {
 // Test NodeJSVerificationStrategy.RequiresAdditionalFiles
 func TestNodeJSVerificationStrategy_RequiresAdditionalFiles(t *testing.T) {
 	strategy := &NodeJSVerificationStrategy{}
-	
+
 	if !strategy.RequiresAdditionalFiles() {
 		t.Error("RequiresAdditionalFiles() should return true for Node.js")
 	}
@@ -1241,12 +1318,11 @@ func TestNodeJSVerificationStrategy_RequiresAdditionalFiles(t *testing.T) {
 // Test NodeJSVerificationStrategy.GetType
 func TestNodeJSVerificationStrategy_GetType(t *testing.T) {
 	strategy := &NodeJSVerificationStrategy{}
-	
+
 	if strategy.GetType() != "nodejs-checksum-gpg" {
 		t.Errorf("GetType() = %v, want 'nodejs-checksum-gpg'", strategy.GetType())
 	}
 }
-
 
 // Test verifyChecksum (via NodeJSVerificationStrategy.Verify)
 func TestVerifyChecksum(t *testing.T) {

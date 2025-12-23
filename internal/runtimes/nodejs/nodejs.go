@@ -852,17 +852,25 @@ func getNodeReleaseDate(release NodeRelease) string {
 // validateVersionPolicy checks if the version is supported or under_review according to the policy
 func (a *NodeJSAdapter) validateVersionPolicy(version endoflife.VersionInfo) error {
 	policyFilePath := ""
+	explicitlyConfigured := false
+
 	if a.config != nil && a.config.PolicyFile != "" {
 		policyFilePath = a.config.PolicyFile
+		explicitlyConfigured = true
 	} else {
 		policyFilePath = filepath.Join("policies", NodeJS+"-policy.json")
 	}
 
-	// If policy file doesn't exist, we allow the download (API-sourced versions are pre-validated)
+	// Check if policy file exists
 	if _, err := os.Stat(policyFilePath); os.IsNotExist(err) {
-		a.stdout.Debug("skipping policy validation - no policy file found",
+		if explicitlyConfigured {
+			// Explicitly configured policy file must exist - this is a misconfiguration
+			return fmt.Errorf("configured policy file does not exist: %s", policyFilePath)
+		}
+		// Default path doesn't exist - allow download (API-sourced versions are pre-validated)
+		a.stdout.Debug("skipping policy validation - no policy file found at default path",
 			"version", version.Version,
-			"expected_path", policyFilePath)
+			"default_path", policyFilePath)
 		return nil
 	}
 
