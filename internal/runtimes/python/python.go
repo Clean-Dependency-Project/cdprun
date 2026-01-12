@@ -142,6 +142,15 @@ func (a *PythonAdapter) GetSupportedPlatforms() []platform.Platform {
 	}
 }
 
+// GetMaintainedVersions returns all non-EOL versions from endoflife API.
+// Includes both actively maintained and security-only (EOAS) versions.
+func (a *PythonAdapter) GetMaintainedVersions(ctx context.Context) ([]endoflife.VersionInfo, error) {
+	if a.endoflifeClient == nil {
+		return nil, fmt.Errorf("endoflife client is not initialized")
+	}
+	return a.endoflifeClient.GetMaintainedReleases(ctx, a.GetEndOfLifeProduct())
+}
+
 // ListVersions retrieves all available Python versions by combining data from
 // the existing python package with endoflife.date API information.
 func (a *PythonAdapter) ListVersions(ctx context.Context) ([]endoflife.VersionInfo, error) {
