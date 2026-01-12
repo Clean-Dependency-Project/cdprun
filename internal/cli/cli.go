@@ -19,6 +19,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/platform"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
+	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
 	"github.com/clean-dependency-project/cdprun/internal/sitegen"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
@@ -80,11 +81,11 @@ func NewApp() *cli.App {
 				Name:  "download",
 				Usage: "Download runtime binaries from runtime-registry.yaml",
 				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:    "runtime",
-						Aliases: []string{"r"},
-						Usage:   "runtime name (nodejs). If not specified, downloads all enabled runtimes from config",
-					},
+				&cli.StringFlag{
+					Name:    "runtime",
+					Aliases: []string{"r"},
+					Usage:   "runtime name (nodejs, python). If not specified, downloads all enabled runtimes from config",
+				},
 					&cli.StringFlag{
 						Name:    "version",
 						Aliases: []string{"v"},
@@ -175,6 +176,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 			adapter := nodejsAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("nodejs", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register nodejs adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
+		case "python":
+			adapter := pythonAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("python", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register python adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,

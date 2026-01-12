@@ -1,0 +1,6 @@
+{
+  "index_url": "https://clean-dependency-project.github.io/cdprun/simple/index.json",
+  "policy_file": "policies/nodejs-policy.json",
+  "base_url": "http://localhost:8081/repository/cdprun/"
+}
+

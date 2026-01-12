@@ -1,7 +1,7 @@
 version: "1.0"
 metadata:
  name: "Runtime Download Registry"
- description: "Configuration for unified runtime download system - Node.js only"
+ description: "Configuration for unified runtime download system"
 config:
  download_timeout: "300s"
  auto_download_all_platforms: true  
@@ -9,6 +9,49 @@ config:
  storage:
    database_path: "./downloads.db"
 runtimes:
+  python:
+    enabled: true
+    name: "Python"
+    description: "High-level programming language"
+    endoflife_product: "python"
+    policy_file: "policies/python-policy.json"
+    version_pattern: "major_minor"
+    supported_architectures:
+      - "x64"
+      - "aarch64"
+    supported_platforms:
+      - os: "windows"
+        arch: ["x64"]
+        file_extension: "exe"
+        download_name: "windows"
+      - os: "linux"
+        arch: ["x64"]
+        file_extension: "tar.xz"
+        download_name: "linux"
+      - os: "mac"
+        arch: ["x64", "aarch64"]
+        file_extension: "pkg"
+        download_name: "mac"
+    download:
+      base_url: "https://www.python.org/ftp/python"
+      url_pattern: "{base_url}/{version}/python-{version}-{arch}.{ext}"
+      user_agent: "cdprun/1.0 (Python)"
+      requires_auth: false
+    verification:
+      enabled: true
+      methods:
+        checksum:
+          enabled: false
+          algorithm: "sha256"
+          file_pattern: ""
+          remote_checksum: false
+        gpg:
+          enabled: true
+          signature_pattern: ".asc"
+    endoflife:
+      product_name: "python"
+      check_eol: true
+      warn_on_eol: true
   nodejs:
    enabled: true
    name: "Node.js"

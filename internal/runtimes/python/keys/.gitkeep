@@ -1,0 +1,2 @@
+# This file ensures the keys directory exists for Go embed directive
+# Python GPG keys can be added here in the future 
