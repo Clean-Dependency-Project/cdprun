@@ -7,13 +7,34 @@
 #         - "version"    # version pattern to ignore
 #
 # Patterns support prefix matching, e.g., "18" matches "18", "18.0", "18.20.8", etc.
-#
-# Note: Python security-only releases are automatically detected via the endoflife.date API
-# (IsEOAS flag) and Windows/macOS downloads are skipped automatically.
 
 nodejs:
   # Windows ARM64 builds are not available for Node.js versions before 20
   windows:
     aarch64:
       - "18"   # Node.js 18.x is not available for Windows ARM64
+
+python:
+  # Python security-only releases (3.9, 3.10, 3.11) don't have binary installers
+  # Python 3.12.11+ also don't have binary installers (security patches only)
+  windows:
+    x64:
+      - "3.9"      # Security-only - no Windows installer
+      - "3.10"     # Security-only - no Windows installer  
+      - "3.11"     # Security-only - no Windows installer
+      - "3.12.11"  # Security patch - no Windows installer
+      - "3.12.12"  # Security patch - no Windows installer
+  mac:
+    x64:
+      - "3.9"      # Security-only - no macOS installer
+      - "3.10"     # Security-only - no macOS installer
+      - "3.11"     # Security-only - no macOS installer
+      - "3.12.11"  # Security patch - no macOS installer
+      - "3.12.12"  # Security patch - no macOS installer
+    aarch64:
+      - "3.9"      # Security-only - no macOS installer
+      - "3.10"     # Security-only - no macOS installer
+      - "3.11"     # Security-only - no macOS installer
+      - "3.12.11"  # Security patch - no macOS installer
+      - "3.12.12"  # Security patch - no macOS installer
 
