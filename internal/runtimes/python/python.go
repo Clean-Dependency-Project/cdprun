@@ -300,12 +300,10 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 		platforms = a.GetSupportedPlatforms()
 	}
 
-	// Check if this is a security-only release (no binary installers for macOS/Windows)
-	// Security-only releases only have source tarballs (Linux)
-	// IsEOAS (End of Active Support) from endoflife.date API indicates security-only mode
-	isSecurityOnly := version.IsEOAS
-	if isSecurityOnly {
-		a.stdout.Info("detected security-only Python release, limiting to source downloads only",
+	// Log if this is a security-only release (informational only)
+	// We don't skip platforms - let downloads proceed and handle 404s via ignore file
+	if version.IsEOAS {
+		a.stdout.Info("processing security-only Python release",
 			"version", version.Version,
 			"latest_patch", version.LatestPatch,
 			"is_eoas", version.IsEOAS)
@@ -316,15 +314,6 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 	var fixedPlatforms []platform.Platform
 	for _, plat := range platforms {
 		fixedPlat := plat // Copy the platform
-
-		// For security-only releases, skip Windows and macOS (no binary installers available)
-		if isSecurityOnly && (plat.OS == "windows" || plat.OS == "mac") {
-			a.stdout.Debug("skipping platform for security-only release",
-				"version", version.LatestPatch,
-				"platform", plat.OS,
-				"reason", "security-only releases only have source tarballs")
-			continue
-		}
 
 		// Override file extension based on Python's actual file naming
 		switch plat.OS {
@@ -377,8 +366,9 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 	}
 
 	// Add verification files based on configuration
+	// Pass the actual platforms being downloaded (after security-only filtering)
 	if a.shouldDownloadVerificationFiles() {
-		verificationTasks := a.createVerificationTasks(version, outputDir, userAgent)
+		verificationTasks := a.createVerificationTasks(version, fixedPlatforms, outputDir, userAgent)
 		tasks = append(tasks, verificationTasks...)
 	}
 
@@ -396,7 +386,8 @@ func (a *PythonAdapter) shouldDownloadVerificationFiles() bool {
 }
 
 // createVerificationTasks creates download tasks for verification files
-func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, outputDir, userAgent string) []runtime.DownloadTask {
+// Only creates signature tasks for the platforms that are actually being downloaded
+func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, downloadPlatforms []platform.Platform, outputDir, userAgent string) []runtime.DownloadTask {
 	var tasks []runtime.DownloadTask
 
 	// Get base URL from config or use default
@@ -408,11 +399,9 @@ func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, o
 	versionBaseURL := fmt.Sprintf("%s/%s", baseURL, version.LatestPatch)
 
 	// Add GPG signature files if GPG verification is enabled
+	// Only create signature tasks for platforms that are actually being downloaded
 	if a.config == nil || a.config.Verification.Methods.GPG.Enabled {
-		// Get all supported platforms for signature files
-		platforms := a.GetSupportedPlatforms()
-
-		for _, plat := range platforms {
+		for _, plat := range downloadPlatforms {
 			// Get the main file URL to derive the signature URL
 			mainURL := a.constructDownloadURL(version.LatestPatch, plat)
 			if mainURL == "" {
@@ -430,7 +419,7 @@ func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, o
 			signatureTask := runtime.DownloadTask{
 				URL:        signatureURL,
 				OutputPath: filepath.Join(outputDir, signatureFileName),
-				Platform:   platform.Platform{OS: "any", Arch: "any", Classifier: "signature-" + plat.Classifier},
+				Platform:   plat, // Inherit platform from the main file
 				Runtime:    Python,
 				Version:    version.LatestPatch,
 				FileType:   "signature",
