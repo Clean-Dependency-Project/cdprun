@@ -52,6 +52,11 @@ runtimes:
       product_name: "python"
       check_eol: true
       warn_on_eol: true
+    release:
+      auto_release: true
+      github_repository: "Clean-Dependency-Project/cdprun"
+      draft_release: false
+      release_name_template: "Python Runtime Binaries - {version}"
   nodejs:
    enabled: true
    name: "Node.js"
