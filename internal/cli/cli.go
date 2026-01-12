@@ -547,7 +547,10 @@ func downloadSingleRuntime(c *cli.Context, manager *runtime.Manager, cfg *config
 			})
 		}
 
-		if successCount > 0 {
+		// Include version in release if:
+		// 1. Downloads succeeded (successCount > 0), OR
+		// 2. All files were already downloaded (len(results) == 0 means skipped as "already downloaded")
+		if successCount > 0 || len(results) == 0 {
 			totalSuccess++
 			// Collect for aggregated release
 			successfulVersions = append(successfulVersions, versionDownload{
