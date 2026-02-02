@@ -685,6 +685,14 @@ func handleAggregatedAutoRelease(
 		return fmt.Errorf("failed to create aggregated release: %w", err)
 	}
 
+	// Release is nil when there are no artifacts to upload
+	if release == nil {
+		stdout.Info("no release created - no artifacts to upload",
+			"runtime", runtimeName,
+			"versions", versions)
+		return nil
+	}
+
 	stdout.Info("aggregated release created successfully",
 		"tag", release.ReleaseTag,
 		"url", release.ReleaseURL,

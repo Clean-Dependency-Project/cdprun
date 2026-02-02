@@ -72,6 +72,28 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		"runtime", runtimeName,
 		"versions", versions)
 
+	// Collect all artifact files BEFORE creating the release
+	// This allows us to skip release creation if there are no artifacts
+	var allArtifactFiles []string
+	for _, version := range versions {
+		artifactFiles, err := rm.collectArtifactFiles(outputDir, runtimeName, version)
+		if err != nil {
+			rm.stderr.Warn("failed to collect artifact files for version", "version", version, "error", err)
+			continue
+		}
+		allArtifactFiles = append(allArtifactFiles, artifactFiles...)
+	}
+
+	// Skip release creation if there are no artifacts to upload
+	if len(allArtifactFiles) == 0 {
+		rm.stdout.Info("skipping release creation - no artifacts to upload",
+			"runtime", runtimeName,
+			"versions", versions)
+		return nil, nil
+	}
+
+	rm.stdout.Info("collected artifacts for upload", "count", len(allArtifactFiles))
+
 	// Use first version for semver (or could use latest)
 	// For aggregated releases, semver is less meaningful
 	var major, minor, patch int
@@ -96,11 +118,13 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		return nil, err
 	}
 
-	// Upload all artifacts (across all versions)
-	uploadedArtifacts, err := rm.uploadAllAggregatedArtifacts(ghRelease.GetID(), outputDir, runtimeName, versions)
+	// Upload all collected artifacts
+	uploadedArtifacts, err := rm.uploadArtifacts(ghRelease.GetID(), allArtifactFiles)
 	if err != nil {
 		return nil, err
 	}
+
+	rm.stdout.Info("all artifacts uploaded successfully", "count", len(uploadedArtifacts))
 
 	// Build artifacts JSON structure
 	artifactsJSON, err := rm.buildArtifactsJSON(uploadedArtifacts, downloadResults)
@@ -146,34 +170,9 @@ func (rm *ReleaseManager) createGitHubRelease(tag, name, body string, draft bool
 	return ghRelease, releaseURL, nil
 }
 
-// uploadAllAggregatedArtifacts collects and uploads artifacts for multiple versions.
-func (rm *ReleaseManager) uploadAllAggregatedArtifacts(releaseID int64, outputDir, runtimeName string, versions []string) (map[string]artifactInfo, error) {
-	var allArtifactFiles []string
-
-	// Collect artifacts for all versions
-	for _, version := range versions {
-		artifactFiles, err := rm.collectArtifactFiles(outputDir, runtimeName, version)
-		if err != nil {
-			rm.stderr.Warn("failed to collect artifact files for version", "version", version, "error", err)
-			continue
-		}
-		allArtifactFiles = append(allArtifactFiles, artifactFiles...)
-	}
-
-	rm.stdout.Info("collected artifacts for upload", "count", len(allArtifactFiles))
-
-	uploadedArtifacts, err := rm.uploadArtifacts(releaseID, allArtifactFiles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to upload artifacts: %w", err)
-	}
-
-	rm.stdout.Info("all artifacts uploaded successfully", "count", len(uploadedArtifacts))
-
-	return uploadedArtifacts, nil
-}
-
 // collectArtifactFiles scans the output directory for all artifact files related to this release.
-// This includes binaries, audit.json files, signatures (.sig), and certificates (.cert).
+// This includes binaries, audit.json files, signatures (.sig/.asc), and certificates (.cert).
+// Empty (0-byte) files are skipped as they indicate failed downloads.
 func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version string) ([]string, error) {
 	var files []string
 
@@ -184,6 +183,12 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 		}
 
 		if info.IsDir() {
+			return nil
+		}
+
+		// Skip empty files (failed downloads create 0-byte files)
+		if info.Size() == 0 {
+			rm.stdout.Debug("skipping empty file", "file", info.Name())
 			return nil
 		}
 
@@ -308,7 +313,7 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 				URL:        info.URL,
 				UploadedAt: time.Now(),
 			}
-		case strings.HasSuffix(filename, ".sig"):
+		case strings.HasSuffix(filename, ".sig"), strings.HasSuffix(filename, ".asc"):
 			plat.Signature = &storage.ArtifactFile{
 				Filename:   filename,
 				Size:       fileInfo.Size,
@@ -425,6 +430,7 @@ func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult)
 
 // formatReleaseName generates the release name from template.
 // This function is used in tests.
+//
 //nolint:unused // Used in release_test.go
 func (rm *ReleaseManager) formatReleaseName(template, runtime, version string) string {
 	if template == "" {
