@@ -281,6 +281,61 @@ func (a *PythonAdapter) GetLatestVersion(ctx context.Context, opts runtime.Versi
 	return filtered[0], nil
 }
 
+// findLastVersionWithBinaries finds the last patch version that has Windows/macOS binary installers.
+// For security-only releases, Python stops publishing binary installers, so we need to find
+// the last version that had them by checking HEAD requests to python.org.
+// Returns the version string (e.g., "3.11.9") or empty string if none found.
+func (a *PythonAdapter) findLastVersionWithBinaries(ctx context.Context, majorMinor string, latestPatch string) string {
+	// Parse the patch number from latestPatch (e.g., "3.11.14" -> 14)
+	parts := strings.Split(latestPatch, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+
+	var patchNum int
+	if _, err := fmt.Sscanf(parts[2], "%d", &patchNum); err != nil {
+		return ""
+	}
+
+	// Get base URL
+	baseURL := "https://www.python.org/ftp/python"
+	if a.config != nil && a.config.Download.BaseURL != "" {
+		baseURL = a.config.Download.BaseURL
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Search backwards from latest patch to find last version with Windows binary
+	for patch := patchNum; patch >= 0; patch-- {
+		testVersion := fmt.Sprintf("%s.%d", majorMinor, patch)
+		testURL := fmt.Sprintf("%s/%s/python-%s-amd64.exe", baseURL, testVersion, testVersion)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, testURL, nil)
+		if err != nil {
+			continue
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			a.stdout.Info("found last Python version with binaries",
+				"major_minor", majorMinor,
+				"version_with_binaries", testVersion,
+				"latest_patch", latestPatch)
+			return testVersion
+		}
+	}
+
+	return ""
+}
+
 // CreateDownloadTasks generates download tasks for the specified Python version and platforms.
 func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platforms []platform.Platform, outputDir string) ([]runtime.DownloadTask, error) {
 	// POLICY VALIDATION: Check if the version is supported or under_review before creating download tasks
@@ -300,13 +355,22 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 		platforms = a.GetSupportedPlatforms()
 	}
 
-	// Log if this is a security-only release (informational only)
-	// We don't skip platforms - let downloads proceed and handle 404s via ignore file
+	// For security-only releases, find the last version that has Windows/macOS binaries
+	var lastVersionWithBinaries string
 	if version.IsEOAS {
 		a.stdout.Info("processing security-only Python release",
 			"version", version.Version,
 			"latest_patch", version.LatestPatch,
 			"is_eoas", version.IsEOAS)
+
+		// Find the last version that has Windows/macOS binary installers
+		lastVersionWithBinaries = a.findLastVersionWithBinaries(context.Background(), version.Version, version.LatestPatch)
+		if lastVersionWithBinaries != "" {
+			a.stdout.Info("will use last version with binaries for Windows/macOS",
+				"version", version.Version,
+				"binary_version", lastVersionWithBinaries,
+				"source_version", version.LatestPatch)
+		}
 	}
 
 	// Fix platform file extensions to match Python's specific requirements
@@ -340,9 +404,22 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 		userAgent = a.config.Download.UserAgent
 	}
 
+	// Track which versions are used for verification tasks
+	var platformVersions []platformVersion
+
 	// Create tasks for main binary/source files
 	for _, plat := range fixedPlatforms {
-		url := a.constructDownloadURL(version.LatestPatch, plat)
+		// Determine which version to use for this platform
+		downloadVersion := version.LatestPatch
+
+		// For security-only releases, use last version with binaries for Windows/macOS
+		if version.IsEOAS && lastVersionWithBinaries != "" {
+			if plat.OS == "windows" || plat.OS == "mac" {
+				downloadVersion = lastVersionWithBinaries
+			}
+		}
+
+		url := a.constructDownloadURL(downloadVersion, plat)
 		if url == "" {
 			continue // Skip unsupported platform combinations
 		}
@@ -357,18 +434,19 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 			OutputPath: outputPath,
 			Platform:   plat,
 			Runtime:    Python,
-			Version:    version.LatestPatch,
+			Version:    downloadVersion,
 			FileType:   "main",
 			Headers:    map[string]string{"User-Agent": userAgent},
 		}
 
 		tasks = append(tasks, task)
+		platformVersions = append(platformVersions, platformVersion{plat: plat, version: downloadVersion})
 	}
 
 	// Add verification files based on configuration
-	// Pass the actual platforms being downloaded (after security-only filtering)
+	// Pass the actual platforms being downloaded with their respective versions
 	if a.shouldDownloadVerificationFiles() {
-		verificationTasks := a.createVerificationTasks(version, fixedPlatforms, outputDir, userAgent)
+		verificationTasks := a.createVerificationTasksWithVersions(platformVersions, outputDir, userAgent)
 		tasks = append(tasks, verificationTasks...)
 	}
 
@@ -385,9 +463,16 @@ func (a *PythonAdapter) shouldDownloadVerificationFiles() bool {
 	return true
 }
 
-// createVerificationTasks creates download tasks for verification files
-// Only creates signature tasks for the platforms that are actually being downloaded
-func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, downloadPlatforms []platform.Platform, outputDir, userAgent string) []runtime.DownloadTask {
+// platformVersion pairs a platform with its specific version for verification tasks
+type platformVersion struct {
+	plat    platform.Platform
+	version string
+}
+
+// createVerificationTasksWithVersions creates download tasks for verification files
+// using specific versions per platform (needed for security-only releases where
+// Windows/macOS use an older version than Linux)
+func (a *PythonAdapter) createVerificationTasksWithVersions(platformVersions []platformVersion, outputDir, userAgent string) []runtime.DownloadTask {
 	var tasks []runtime.DownloadTask
 
 	// Get base URL from config or use default
@@ -396,14 +481,13 @@ func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, d
 		baseURL = a.config.Download.BaseURL
 	}
 
-	versionBaseURL := fmt.Sprintf("%s/%s", baseURL, version.LatestPatch)
-
 	// Add GPG signature files if GPG verification is enabled
-	// Only create signature tasks for platforms that are actually being downloaded
 	if a.config == nil || a.config.Verification.Methods.GPG.Enabled {
-		for _, plat := range downloadPlatforms {
+		for _, pv := range platformVersions {
+			versionBaseURL := fmt.Sprintf("%s/%s", baseURL, pv.version)
+
 			// Get the main file URL to derive the signature URL
-			mainURL := a.constructDownloadURL(version.LatestPatch, plat)
+			mainURL := a.constructDownloadURL(pv.version, pv.plat)
 			if mainURL == "" {
 				continue
 			}
@@ -419,9 +503,9 @@ func (a *PythonAdapter) createVerificationTasks(version endoflife.VersionInfo, d
 			signatureTask := runtime.DownloadTask{
 				URL:        signatureURL,
 				OutputPath: filepath.Join(outputDir, signatureFileName),
-				Platform:   plat, // Inherit platform from the main file
+				Platform:   pv.plat,
 				Runtime:    Python,
-				Version:    version.LatestPatch,
+				Version:    pv.version,
 				FileType:   "signature",
 				Headers:    map[string]string{"User-Agent": userAgent},
 				Optional:   true, // Signature files are optional
@@ -688,8 +772,8 @@ func (a *PythonAdapter) validateVersionPolicy(version endoflife.VersionInfo) err
 					"under_review", policyVersion.UnderReview)
 				return nil
 			} else {
-			return fmt.Errorf("python version %s is not supported or under review according to policy (supported=%t, under_review=%t)",
-				version.Version, policyVersion.Supported, policyVersion.UnderReview)
+				return fmt.Errorf("python version %s is not supported or under review according to policy (supported=%t, under_review=%t)",
+					version.Version, policyVersion.Supported, policyVersion.UnderReview)
 			}
 		}
 	}
