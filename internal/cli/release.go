@@ -173,11 +173,30 @@ func (rm *ReleaseManager) createGitHubRelease(tag, name, body string, draft bool
 // collectArtifactFiles scans the output directory for all artifact files related to this release.
 // This includes binaries, audit.json files, signatures (.sig/.asc), and certificates (.cert).
 // Empty (0-byte) files are skipped as they indicate failed downloads.
+// For security-only releases where the binary version differs from the recorded version,
+// this function uses the database to find the actual filenames.
 func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version string) ([]string, error) {
 	var files []string
 
+	// Get filenames from database for this version
+	// This handles cases where the binary version differs from recorded version
+	// (e.g., Python 3.12.12 uses python-3.12.10-amd64.exe for Windows/macOS)
+	dbFilenames := make(map[string]bool)
+	downloads, err := rm.db.ListByVersion(runtimeName, version)
+	if err != nil {
+		rm.stderr.Warn("failed to list downloads from database", "runtime", runtimeName, "version", version, "error", err)
+	} else {
+		for _, dl := range downloads {
+			dbFilenames[dl.Filename] = true
+			// Also add related files (signature, audit)
+			dbFilenames[dl.Filename+".asc"] = true
+			dbFilenames[dl.Filename+".sig"] = true
+			dbFilenames[dl.Filename+".audit.json"] = true
+		}
+	}
+
 	// Walk the output directory
-	err := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -192,9 +211,10 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 			return nil
 		}
 
-		// Include all files that match the version pattern
-		// This covers binaries, audit.json, signatures, and certificates
-		if strings.Contains(info.Name(), version) {
+		// Include files that:
+		// 1. Match the version pattern in filename (original behavior)
+		// 2. OR are recorded in the database for this version (handles security-only releases)
+		if strings.Contains(info.Name(), version) || dbFilenames[info.Name()] {
 			files = append(files, path)
 		}
 
