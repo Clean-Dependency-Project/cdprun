@@ -35,6 +35,9 @@ type DatabaseStore interface {
 	// GetRelease retrieves a release by runtime name and version.
 	GetRelease(runtime, version string) (*storage.Release, error)
 
+	// ListByVersion returns all downloads for a specific runtime and version.
+	ListByVersion(runtime, version string) ([]*storage.Download, error)
+
 	// Close closes the database connection.
 	Close() error
 }
