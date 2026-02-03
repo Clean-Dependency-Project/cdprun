@@ -1,0 +1,16 @@
+{
+  "nexus_url": "http://localhost:8081",
+  "index_base_url": "https://clean-dependency-project.github.io/cdprun/simple",
+  "runtimes": {
+    "python": {
+      "repository": "cdprun-python",
+      "index_path": "python/index.json",
+      "policy_file": "policies/python-policy.json"
+    },
+    "nodejs": {
+      "repository": "cdprun-nodejs",
+      "index_path": "nodejs/index.json",
+      "policy_file": "policies/nodejs-policy.json"
+    }
+  }
+}

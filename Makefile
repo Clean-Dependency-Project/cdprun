@@ -91,6 +91,23 @@ run-auto: build
 	@echo "Running automated demo..."
 	@./$(BINARY_PATH) --auto
 
+# Nexus proxy download targets
+nexus-download:
+	@echo "Downloading all runtimes through Nexus proxy..."
+	@python3 scripts/nexus_proxy_download.py
+
+nexus-download-python:
+	@echo "Downloading Python through Nexus proxy..."
+	@python3 scripts/nexus_proxy_download.py --runtime python
+
+nexus-download-nodejs:
+	@echo "Downloading Node.js through Nexus proxy..."
+	@python3 scripts/nexus_proxy_download.py --runtime nodejs
+
+nexus-download-dry-run:
+	@echo "Checking what would be downloaded (dry run)..."
+	@python3 scripts/nexus_proxy_download.py --dry-run
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run
