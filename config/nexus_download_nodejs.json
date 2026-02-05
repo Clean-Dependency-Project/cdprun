@@ -4,11 +4,6 @@
   "nexus_password_env": "NEXUS_PASSWORD",
   "index_base_url": "https://clean-dependency-project.github.io/cdprun/simple",
   "runtimes": {
-    "python": {
-      "repository": "cdprun-python",
-      "index_path": "python/index.json",
-      "policy_file": "policies/python-policy.json"
-    },
     "nodejs": {
       "repository": "cdprun-nodejs",
       "index_path": "nodejs/index.json",

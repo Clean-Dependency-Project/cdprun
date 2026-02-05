@@ -1,0 +1,361 @@
+name: Build Python RPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: 'Python version to build (e.g., 3.13.11)'
+        required: true
+        default: '3.13.11'
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  PYTHON_VERSION: ${{ inputs.python_version }}
+
+jobs:
+  build-rpm:
+    name: Build Python ${{ inputs.python_version }} RPM
+    runs-on: ubuntu-latest
+    container:
+      image: amazonlinux:2023
+    outputs:
+      rpm_filename: ${{ steps.build.outputs.rpm_filename }}
+      rpm_sha256: ${{ steps.build.outputs.rpm_sha256 }}
+    steps:
+      - name: Install build dependencies
+        run: |
+          yum install -y --allowerasing \
+            rpm-build \
+            rpmdevtools \
+            curl \
+            tar \
+            gzip \
+            git \
+            gcc \
+            gcc-c++ \
+            make \
+            openssl-devel \
+            bzip2-devel \
+            libffi-devel \
+            zlib-devel \
+            readline-devel \
+            sqlite-devel \
+            ncurses-devel \
+            xz-devel \
+            tk-devel \
+            gdbm-devel \
+            libuuid-devel \
+            findutils \
+            && yum clean all
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up rpmbuild tree
+        run: rpmdev-setuptree
+
+      - name: Download Python source
+        run: |
+          echo "Downloading Python ${PYTHON_VERSION} source from python.org..."
+          curl -L --fail -o ~/rpmbuild/SOURCES/Python-${PYTHON_VERSION}.tgz \
+            "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz"
+          ls -lh ~/rpmbuild/SOURCES/
+
+      - name: Copy spec file
+        run: cp rpm/python.spec ~/rpmbuild/SPECS/
+
+      - name: Build RPM
+        id: build
+        run: |
+          echo "Building Python ${PYTHON_VERSION} RPM (this may take 10-20 minutes)..."
+          rpmbuild -bb ~/rpmbuild/SPECS/python.spec \
+            --define "runtime_version ${PYTHON_VERSION}" \
+            --define "_topdir $HOME/rpmbuild"
+          
+          # Find the built RPM
+          RPM_FILE=$(find ~/rpmbuild/RPMS -name "python-${PYTHON_VERSION}-*.rpm" -type f | head -1)
+          
+          if [[ -z "$RPM_FILE" ]]; then
+            echo "ERROR: Could not find built RPM"
+            find ~/rpmbuild/RPMS -type f
+            exit 1
+          fi
+          
+          RPM_FILENAME=$(basename "$RPM_FILE")
+          RPM_SHA256=$(sha256sum "$RPM_FILE" | cut -d' ' -f1)
+          
+          echo "Built RPM: $RPM_FILE"
+          echo "Filename: $RPM_FILENAME"
+          echo "SHA256: $RPM_SHA256"
+          
+          # Copy to workspace for upload
+          cp "$RPM_FILE" .
+          
+          echo "rpm_filename=${RPM_FILENAME}" >> $GITHUB_OUTPUT
+          echo "rpm_sha256=${RPM_SHA256}" >> $GITHUB_OUTPUT
+          
+          # Show RPM info
+          rpm -qip "$RPM_FILENAME"
+
+      - name: Install RPM for testing
+        run: |
+          echo "Installing RPM..."
+          rpm -ivh ${{ steps.build.outputs.rpm_filename }}
+          echo "Installation complete"
+
+      - name: Run functional tests
+        run: |
+          PYTHON_BIN="/export/apps/citools/python/python-${PYTHON_VERSION}/bin/python3"
+          
+          echo "Testing Python binary at: $PYTHON_BIN"
+          
+          # Verify binary exists
+          if [[ ! -x "$PYTHON_BIN" ]]; then
+            echo "ERROR: Python binary not found at $PYTHON_BIN"
+            ls -la /export/apps/citools/python/python-${PYTHON_VERSION}/ || true
+            ls -la /export/apps/citools/python/python-${PYTHON_VERSION}/bin/ || true
+            exit 1
+          fi
+          
+          # Show version
+          "$PYTHON_BIN" --version
+          
+          # Run functional test script
+          "$PYTHON_BIN" rpm/test-python.py "${PYTHON_VERSION}"
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-rpm
+          path: ${{ steps.build.outputs.rpm_filename }}
+          retention-days: 30
+
+  publish:
+    name: Publish to GitHub Releases
+    runs-on: ubuntu-latest
+    needs: build-rpm
+    outputs:
+      release_url: ${{ steps.release.outputs.release_url }}
+      asset_url: ${{ steps.release.outputs.asset_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download RPM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-rpm
+
+      - name: Verify RPM
+        run: |
+          ls -la
+          RPM_FILE="${{ needs.build-rpm.outputs.rpm_filename }}"
+          echo "RPM file: $RPM_FILE"
+          
+          # Verify SHA256
+          ACTUAL_SHA256=$(sha256sum "$RPM_FILE" | cut -d' ' -f1)
+          EXPECTED_SHA256="${{ needs.build-rpm.outputs.rpm_sha256 }}"
+          
+          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "ERROR: SHA256 mismatch!"
+            echo "Expected: $EXPECTED_SHA256"
+            echo "Actual: $ACTUAL_SHA256"
+            exit 1
+          fi
+          
+          echo "SHA256 verified: $ACTUAL_SHA256"
+
+      - name: Create GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_TAG="python-rpm-${PYTHON_VERSION}"
+          RELEASE_NAME="Python ${PYTHON_VERSION} RPM"
+          RPM_FILE="${{ needs.build-rpm.outputs.rpm_filename }}"
+          RPM_SHA256="${{ needs.build-rpm.outputs.rpm_sha256 }}"
+          
+          # Create release body
+          RELEASE_BODY=$(cat <<EOF
+          ## Python ${PYTHON_VERSION} RPM Package
+          
+          Compiled from official python.org source for Amazon Linux 2023.
+          
+          ### Installation
+          
+          \`\`\`bash
+          # Download and install
+          rpm -ivh ${RPM_FILE}
+          
+          # Use Python
+          /export/apps/citools/python/python-${PYTHON_VERSION}/bin/python3 --version
+          \`\`\`
+          
+          ### Details
+          
+          - **Install location**: \`/export/apps/citools/python/python-${PYTHON_VERSION}/\`
+          - **SHA256**: \`${RPM_SHA256}\`
+          - **Build date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          ### Build Configuration
+          
+          Compiled with:
+          - \`--enable-optimizations\`
+          - \`--with-lto\`
+          - \`--with-system-ffi\`
+          - \`--enable-loadable-sqlite-extensions\`
+          - \`--with-ensurepip=upgrade\`
+          EOF
+          )
+          
+          # Delete existing release if it exists
+          gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
+          
+          # Create new release
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_NAME" \
+            --notes "$RELEASE_BODY" \
+            "$RPM_FILE"
+          
+          # Get release URL
+          RELEASE_URL=$(gh release view "$RELEASE_TAG" --json url -q '.url')
+          ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${RPM_FILE}"
+          
+          echo "release_url=${RELEASE_URL}" >> $GITHUB_OUTPUT
+          echo "asset_url=${ASSET_URL}" >> $GITHUB_OUTPUT
+          
+          echo "Release created: $RELEASE_URL"
+          echo "Asset URL: $ASSET_URL"
+
+  update-index:
+    name: Update Downloads Index
+    runs-on: ubuntu-latest
+    needs: [build-rpm, publish]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up ORAS
+        run: |
+          # Install ORAS CLI
+          curl -LO "https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz"
+          tar -xzf oras_1.2.0_linux_amd64.tar.gz
+          sudo mv oras /usr/local/bin/
+          oras version
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull downloads.db from GHCR
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "Pulling database from ghcr.io/${REPO_LOWER}/downloads-db:latest"
+          oras pull ghcr.io/${REPO_LOWER}/downloads-db:latest -o . || echo "No existing database found"
+          
+          if [[ -f downloads.db ]]; then
+            echo "Database found:"
+            ls -lh downloads.db
+          else
+            echo "WARNING: No downloads.db found. Index update will be skipped."
+            echo "Run the main download workflow first to create the database."
+            exit 0
+          fi
+
+      - name: Insert release record
+        run: |
+          if [[ ! -f downloads.db ]]; then
+            echo "No database to update"
+            exit 0
+          fi
+          
+          RELEASE_TAG="python-rpm-${PYTHON_VERSION}"
+          RELEASE_URL="${{ needs.publish.outputs.release_url }}"
+          ASSET_URL="${{ needs.publish.outputs.asset_url }}"
+          RPM_FILENAME="${{ needs.build-rpm.outputs.rpm_filename }}"
+          RPM_SHA256="${{ needs.build-rpm.outputs.rpm_sha256 }}"
+          
+          # Parse version components
+          MAJOR=$(echo "${PYTHON_VERSION}" | cut -d. -f1)
+          MINOR=$(echo "${PYTHON_VERSION}" | cut -d. -f2)
+          PATCH=$(echo "${PYTHON_VERSION}" | cut -d. -f3)
+          
+          # Build artifacts JSON
+          ARTIFACTS_JSON=$(cat <<EOF
+          {
+            "platforms": [
+              {
+                "platform": "linux-rpm-x86_64",
+                "platform_os": "linux",
+                "platform_arch": "x86_64",
+                "binary": {
+                  "filename": "${RPM_FILENAME}",
+                  "size": $(stat -c%s "${RPM_FILENAME}" 2>/dev/null || echo 0),
+                  "sha256": "${RPM_SHA256}",
+                  "url": "${ASSET_URL}",
+                  "uploaded_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                }
+              }
+            ],
+            "common_files": [],
+            "metadata": {
+              "total_platforms": 1,
+              "total_size": $(stat -c%s "${RPM_FILENAME}" 2>/dev/null || echo 0)
+            }
+          }
+          EOF
+          )
+          
+          # Escape JSON for SQLite
+          ARTIFACTS_ESCAPED=$(echo "$ARTIFACTS_JSON" | sed "s/'/''/g")
+          
+          # Check if release already exists
+          EXISTING=$(sqlite3 downloads.db "SELECT COUNT(*) FROM releases WHERE release_tag='${RELEASE_TAG}';")
+          
+          if [[ "$EXISTING" -gt 0 ]]; then
+            echo "Updating existing release record..."
+            sqlite3 downloads.db "UPDATE releases SET 
+              release_url='${RELEASE_URL}',
+              artifacts='${ARTIFACTS_ESCAPED}',
+              created_at=datetime('now')
+              WHERE release_tag='${RELEASE_TAG}';"
+          else
+            echo "Inserting new release record..."
+            sqlite3 downloads.db "INSERT INTO releases 
+              (runtime, version, semver_major, semver_minor, semver_patch, release_tag, release_url, artifacts, created_at)
+              VALUES 
+              ('python', '${PYTHON_VERSION}', ${MAJOR}, ${MINOR}, ${PATCH}, '${RELEASE_TAG}', '${RELEASE_URL}', '${ARTIFACTS_ESCAPED}', datetime('now'));"
+          fi
+          
+          # Verify insertion
+          echo "Release record:"
+          sqlite3 downloads.db "SELECT runtime, version, release_tag FROM releases WHERE release_tag='${RELEASE_TAG}';"
+
+      - name: Download RPM artifact for size
+        uses: actions/download-artifact@v4
+        with:
+          name: python-rpm
+        continue-on-error: true
+
+      - name: Push updated downloads.db to GHCR
+        run: |
+          if [[ ! -f downloads.db ]]; then
+            echo "No database to push"
+            exit 0
+          fi
+          
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "Pushing database to ghcr.io/${REPO_LOWER}/downloads-db:latest"
+          oras push ghcr.io/${REPO_LOWER}/downloads-db:latest ./downloads.db
+
+      - name: Trigger site deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering site deployment workflow..."
+          gh workflow run run.yaml --ref ${{ github.ref_name }} || echo "Could not trigger workflow (may need manual run)"
+          echo "Site deployment triggered. Index will be updated shortly."

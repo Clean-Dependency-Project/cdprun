@@ -10,6 +10,7 @@ Uses only Python standard library (no external dependencies).
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import logging
@@ -20,6 +21,15 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 from typing import Any
+
+
+def build_auth_header(username: str, password: str) -> str | None:
+    """Build Basic Auth header value if credentials are provided."""
+    if username and password:
+        credentials = f"{username}:{password}"
+        encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
+        return f"Basic {encoded}"
+    return None
 
 
 class JsonFormatter(logging.Formatter):
@@ -112,11 +122,13 @@ def fetch_index(index_url: str) -> dict[str, Any]:
         sys.exit(1)
 
 
-def check_exists_in_nexus(nexus_url: str) -> bool:
+def check_exists_in_nexus(nexus_url: str, auth_header: str | None = None) -> bool:
     """Check if a file exists in Nexus using HEAD request."""
     try:
         req = urllib.request.Request(nexus_url, method="HEAD")
         req.add_header("User-Agent", "nexus-proxy-download/1.0")
+        if auth_header:
+            req.add_header("Authorization", auth_header)
         with urllib.request.urlopen(req, timeout=30) as response:
             return response.status == 200
     except urllib.error.HTTPError as e:
@@ -129,12 +141,14 @@ def check_exists_in_nexus(nexus_url: str) -> bool:
         return False
 
 
-def download_through_proxy(nexus_url: str, target_path: str) -> bool:
+def download_through_proxy(nexus_url: str, target_path: str, auth_header: str | None = None) -> bool:
     """Download a file through the Nexus proxy."""
     try:
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         req = urllib.request.Request(nexus_url)
         req.add_header("User-Agent", "nexus-proxy-download/1.0")
+        if auth_header:
+            req.add_header("Authorization", auth_header)
         with urllib.request.urlopen(req, timeout=300) as response:
             with open(target_path, "wb") as f:
                 while True:
@@ -170,12 +184,29 @@ def build_nexus_url(nexus_base: str, repository: str, binary_path: str) -> str:
     return f"{nexus_base.rstrip('/')}/repository/{repository}/{binary_path}"
 
 
+def get_nexus_auth(config: dict[str, Any]) -> str | None:
+    """Get Nexus authentication header from config and environment."""
+    username = config.get("nexus_username", "")
+    password_env = config.get("nexus_password_env", "")
+    
+    if not username or not password_env:
+        return None
+    
+    password = os.environ.get(password_env, "")
+    if not password:
+        logger.warning(f"Environment variable {password_env} not set, proceeding without authentication")
+        return None
+    
+    return build_auth_header(username, password)
+
+
 def process_runtime(
     runtime_name: str,
     runtime_config: dict[str, Any],
     config: dict[str, Any],
     temp_dir: str,
     dry_run: bool,
+    auth_header: str | None = None,
 ) -> dict[str, list]:
     """Process a single runtime, downloading all approved binaries."""
     result = {"downloaded": [], "skipped": [], "cached": [], "failed": []}
@@ -220,7 +251,7 @@ def process_runtime(
             filename = os.path.basename(binary_path)
 
             # Check if already cached in Nexus
-            if check_exists_in_nexus(nexus_url):
+            if check_exists_in_nexus(nexus_url, auth_header):
                 logger.info(f"Already cached in Nexus: {filename}")
                 result["cached"].append({
                     "runtime": runtime_name,
@@ -245,7 +276,7 @@ def process_runtime(
             target_path = os.path.join(temp_dir, runtime_name, platform, filename)
             logger.info(f"Downloading {filename} for {platform}...")
 
-            if download_through_proxy(nexus_url, target_path):
+            if download_through_proxy(nexus_url, target_path, auth_header):
                 # Verify SHA256 if provided
                 if expected_sha256:
                     if verify_sha256(target_path, expected_sha256):
@@ -318,6 +349,9 @@ def main() -> None:
     # Load configuration
     config = load_config(args.config)
 
+    # Get authentication header if configured
+    auth_header = get_nexus_auth(config)
+
     # Create temporary directory for downloads
     temp_dir = tempfile.mkdtemp(prefix="nexus-proxy-download-")
     logger.info(f"Using temporary directory: {temp_dir}")
@@ -345,7 +379,7 @@ def main() -> None:
     for runtime_name, runtime_config in runtimes_to_process.items():
         logger.info(f"Processing runtime: {runtime_name}")
         result = process_runtime(
-            runtime_name, runtime_config, config, temp_dir, args.dry_run
+            runtime_name, runtime_config, config, temp_dir, args.dry_run, auth_header
         )
 
         summary["downloaded"].extend(result["downloaded"])

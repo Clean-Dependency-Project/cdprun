@@ -108,6 +108,37 @@ nexus-download-dry-run:
 	@echo "Checking what would be downloaded (dry run)..."
 	@python3 scripts/nexus_proxy_download.py --dry-run
 
+# =============================================================================
+# Python RPM Build (Local Development)
+# Build Python RPM packages locally using Docker with Amazon Linux 2023
+# =============================================================================
+
+PYTHON_RPM_VERSION ?= 3.13.11
+
+# Build Python RPM locally using Docker
+rpm-python-local:
+	@echo "Building Python $(PYTHON_RPM_VERSION) RPM locally..."
+	@docker run --rm -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -c '\
+		set -e && \
+		yum install -y --allowerasing rpm-build rpmdevtools curl tar gzip gcc gcc-c++ make \
+			openssl-devel bzip2-devel libffi-devel zlib-devel readline-devel sqlite-devel \
+			ncurses-devel xz-devel tk-devel gdbm-devel libuuid-devel findutils && \
+		rpmdev-setuptree && \
+		curl -L --fail -o ~/rpmbuild/SOURCES/Python-$(PYTHON_RPM_VERSION).tgz \
+			"https://www.python.org/ftp/python/$(PYTHON_RPM_VERSION)/Python-$(PYTHON_RPM_VERSION).tgz" && \
+		cp rpm/python.spec ~/rpmbuild/SPECS/ && \
+		rpmbuild -bb ~/rpmbuild/SPECS/python.spec \
+			--define "runtime_version $(PYTHON_RPM_VERSION)" \
+			--define "_topdir $$HOME/rpmbuild" && \
+		cp ~/rpmbuild/RPMS/*/*.rpm /workspace/ && \
+		echo "RPM built successfully:" && \
+		ls -lh /workspace/*.rpm'
+
+# Interactive shell in Amazon Linux container for debugging
+rpm-python-shell:
+	@echo "Starting interactive shell in Amazon Linux 2023 container..."
+	@docker run --rm -it -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run rpm-python-local rpm-python-shell
