@@ -209,8 +209,13 @@ jobs:
     container:
       image: alpine:3.19
     steps:
-      - name: Install minimal tools for checkout
-        run: apk add --no-cache tar gzip
+      - name: Install minimal tools and runtime deps
+        run: |
+          # Tools needed for checkout action
+          apk add --no-cache tar gzip
+          # Runtime dependencies for Python (not build deps)
+          # These are small, common packages needed for sqlite3 and ctypes
+          apk add --no-cache libffi sqlite-libs
 
       - name: Checkout (for test script only)
         uses: actions/checkout@v4
@@ -226,7 +231,7 @@ jobs:
       - name: Install package (no build deps)
         run: |
           echo "=== Fresh Alpine 3.19 container ==="
-          echo "Installed packages before:"
+          echo "Installed packages (including runtime deps):"
           apk list --installed 2>/dev/null | wc -l
           
           echo ""
@@ -361,14 +366,19 @@ jobs:
           RELEASE_BODY=$(cat <<EOF
           ## Python ${PYTHON_VERSION} for Alpine Linux 3.19
           
-          **Tested on:** Fresh Alpine Linux 3.19 container (no build dependencies)
+          **Tested on:** Fresh Alpine Linux 3.19 container
           **Install location:** \`/export/apps/citools/python/python-${PYTHON_VERSION}/\`
           **SHA256:** \`${PKG_SHA256}\`
           **Build date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
           
+          ### Runtime Dependencies
+          \`\`\`bash
+          apk add --no-cache libffi sqlite-libs
+          \`\`\`
+          
           ### Tests Passed
           - Version check
-          - Standard library imports (ssl, sqlite3, asyncio, etc.)
+          - Standard library imports (ssl, sqlite3, asyncio, ctypes, etc.)
           - SSL/TLS functionality
           - SQLite operations
           - File I/O
@@ -378,6 +388,10 @@ jobs:
           ### Installation
           
           \`\`\`bash
+          # Install runtime dependencies
+          apk add --no-cache libffi sqlite-libs
+          
+          # Download and extract Python
           curl -LO https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PKG_FILE}
           tar -xzf ${PKG_FILE} -C /
           /export/apps/citools/python/python-${PYTHON_VERSION}/bin/python3 --version

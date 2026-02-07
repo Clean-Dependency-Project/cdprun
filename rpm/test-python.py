@@ -21,13 +21,13 @@ import os
 import sys
 import tempfile
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def run_tests(expected_version: str) -> dict:
     """Run all tests and return results as a dictionary."""
     results = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "expected_version": expected_version,
         "python_executable": sys.executable,
         "tests": [],
