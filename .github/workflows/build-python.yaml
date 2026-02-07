@@ -117,11 +117,11 @@ jobs:
           tar -xzf Python-${PYTHON_VERSION}.tgz
           cd Python-${PYTHON_VERSION}
           
+          # Note: --enable-optimizations is disabled for Alpine because PGO tests
+          # fail due to musl libc locale limitations. LTO is still enabled.
           ./configure \
             --prefix=/export/apps/citools/python/python-${PYTHON_VERSION} \
-            --enable-optimizations \
             --with-lto \
-            --with-system-ffi \
             --with-computed-gotos \
             --enable-ipv6 \
             --enable-loadable-sqlite-extensions \
@@ -162,6 +162,9 @@ jobs:
     container:
       image: amazonlinux:2023
     steps:
+      - name: Install minimal tools for checkout
+        run: yum install -y tar gzip && yum clean all
+
       - name: Checkout (for test script only)
         uses: actions/checkout@v4
         with:
@@ -206,6 +209,9 @@ jobs:
     container:
       image: alpine:3.19
     steps:
+      - name: Install minimal tools for checkout
+        run: apk add --no-cache tar gzip
+
       - name: Checkout (for test script only)
         uses: actions/checkout@v4
         with:
