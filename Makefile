@@ -109,36 +109,61 @@ nexus-download-dry-run:
 	@python3 scripts/nexus_proxy_download.py --dry-run
 
 # =============================================================================
-# Python RPM Build (Local Development)
-# Build Python RPM packages locally using Docker with Amazon Linux 2023
+# Python Package Build (Local Development)
+# Build Python packages locally using Docker
 # =============================================================================
 
-PYTHON_RPM_VERSION ?= 3.13.11
+PYTHON_VERSION ?= 3.13.11
 
-# Build Python RPM locally using Docker
-rpm-python-local:
-	@echo "Building Python $(PYTHON_RPM_VERSION) RPM locally..."
+# Build Python RPM for Amazon Linux 2023
+python-amazonlinux:
+	@echo "Building Python $(PYTHON_VERSION) RPM for Amazon Linux 2023..."
 	@docker run --rm -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -c '\
 		set -e && \
 		yum install -y --allowerasing rpm-build rpmdevtools curl tar gzip gcc gcc-c++ make \
 			openssl-devel bzip2-devel libffi-devel zlib-devel readline-devel sqlite-devel \
 			ncurses-devel xz-devel tk-devel gdbm-devel libuuid-devel findutils && \
 		rpmdev-setuptree && \
-		curl -L --fail -o ~/rpmbuild/SOURCES/Python-$(PYTHON_RPM_VERSION).tgz \
-			"https://www.python.org/ftp/python/$(PYTHON_RPM_VERSION)/Python-$(PYTHON_RPM_VERSION).tgz" && \
+		curl -L --fail -o ~/rpmbuild/SOURCES/Python-$(PYTHON_VERSION).tgz \
+			"https://www.python.org/ftp/python/$(PYTHON_VERSION)/Python-$(PYTHON_VERSION).tgz" && \
 		cp rpm/python.spec ~/rpmbuild/SPECS/ && \
 		rpmbuild -bb ~/rpmbuild/SPECS/python.spec \
-			--define "runtime_version $(PYTHON_RPM_VERSION)" \
+			--define "runtime_version $(PYTHON_VERSION)" \
 			--define "_topdir $$HOME/rpmbuild" && \
 		cp ~/rpmbuild/RPMS/*/*.rpm /workspace/ && \
 		echo "RPM built successfully:" && \
 		ls -lh /workspace/*.rpm'
 
-# Interactive shell in Amazon Linux container for debugging
-rpm-python-shell:
+# Build Python tarball for Alpine Linux
+python-alpine:
+	@echo "Building Python $(PYTHON_VERSION) for Alpine Linux..."
+	@docker run --rm -v $(PWD):/workspace -w /workspace alpine:3.19 /bin/sh -c '\
+		set -e && \
+		apk add --no-cache curl tar gzip gcc g++ make musl-dev linux-headers \
+			openssl-dev bzip2-dev libffi-dev zlib-dev readline-dev sqlite-dev \
+			ncurses-dev xz-dev tk-dev gdbm-dev libuuid util-linux-dev tcl-dev expat-dev && \
+		curl -L --fail -o /tmp/Python-$(PYTHON_VERSION).tgz \
+			"https://www.python.org/ftp/python/$(PYTHON_VERSION)/Python-$(PYTHON_VERSION).tgz" && \
+		cd /tmp && tar -xzf Python-$(PYTHON_VERSION).tgz && cd Python-$(PYTHON_VERSION) && \
+		./configure --prefix=/export/apps/citools/python/python-$(PYTHON_VERSION) \
+			--enable-optimizations --with-lto --with-system-ffi --with-computed-gotos \
+			--enable-ipv6 --enable-loadable-sqlite-extensions --with-ensurepip=upgrade && \
+		make -j$$(nproc) && \
+		DESTDIR=/tmp/python-install make install && \
+		cd /tmp/python-install && \
+		tar -czf /workspace/python-$(PYTHON_VERSION)-alpine319-x86_64.tar.gz . && \
+		echo "Alpine package built successfully:" && \
+		ls -lh /workspace/python-$(PYTHON_VERSION)-alpine*.tar.gz'
+
+# Interactive shells for debugging
+python-amazonlinux-shell:
 	@echo "Starting interactive shell in Amazon Linux 2023 container..."
 	@docker run --rm -it -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash
 
+python-alpine-shell:
+	@echo "Starting interactive shell in Alpine Linux container..."
+	@docker run --rm -it -v $(PWD):/workspace -w /workspace alpine:3.19 /bin/sh
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run rpm-python-local rpm-python-shell
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell
