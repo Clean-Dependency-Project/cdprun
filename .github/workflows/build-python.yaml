@@ -8,14 +8,6 @@ on:
         required: true
         default: '3.13.11'
         type: string
-      distro:
-        description: 'Target distribution'
-        required: true
-        default: 'amazonlinux'
-        type: choice
-        options:
-          - amazonlinux
-          - alpine
 
 permissions:
   contents: write
@@ -24,15 +16,13 @@ permissions:
 
 env:
   PYTHON_VERSION: ${{ inputs.python_version }}
-  DISTRO: ${{ inputs.distro }}
 
 jobs:
   # =============================================================================
   # BUILD: Amazon Linux 2023 - RPM
   # =============================================================================
   build-amazonlinux:
-    name: Build RPM
-    if: inputs.distro == 'amazonlinux'
+    name: Build RPM (Amazon Linux)
     runs-on: ubuntu-latest
     container:
       image: amazonlinux:2023
@@ -86,7 +76,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-package
+          name: python-amazonlinux
           path: ${{ steps.build.outputs.package_filename }}
           retention-days: 30
 
@@ -94,8 +84,7 @@ jobs:
   # BUILD: Alpine Linux - Tarball
   # =============================================================================
   build-alpine:
-    name: Build Alpine Package
-    if: inputs.distro == 'alpine'
+    name: Build Tarball (Alpine)
     runs-on: ubuntu-latest
     container:
       image: alpine:3.19
@@ -159,7 +148,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-package
+          name: python-alpine
           path: ${{ steps.build.outputs.package_filename }}
           retention-days: 30
 
@@ -168,7 +157,6 @@ jobs:
   # =============================================================================
   test-amazonlinux:
     name: Test on Fresh Amazon Linux
-    if: inputs.distro == 'amazonlinux'
     needs: build-amazonlinux
     runs-on: ubuntu-latest
     container:
@@ -183,7 +171,7 @@ jobs:
       - name: Download package
         uses: actions/download-artifact@v4
         with:
-          name: python-package
+          name: python-amazonlinux
 
       - name: Install package (no build deps)
         run: |
@@ -213,7 +201,6 @@ jobs:
   # =============================================================================
   test-alpine:
     name: Test on Fresh Alpine
-    if: inputs.distro == 'alpine'
     needs: build-alpine
     runs-on: ubuntu-latest
     container:
@@ -228,7 +215,7 @@ jobs:
       - name: Download package
         uses: actions/download-artifact@v4
         with:
-          name: python-package
+          name: python-alpine
 
       - name: Install package (no build deps)
         run: |
@@ -254,15 +241,12 @@ jobs:
           "$PYTHON_BIN" rpm/test-python.py "${PYTHON_VERSION}"
 
   # =============================================================================
-  # PUBLISH: GitHub Releases (after tests pass)
+  # PUBLISH: Amazon Linux RPM to GitHub Releases
   # =============================================================================
-  publish:
-    name: Publish to GitHub Releases
+  publish-amazonlinux:
+    name: Publish Amazon Linux RPM
     runs-on: ubuntu-latest
-    needs: [build-amazonlinux, build-alpine, test-amazonlinux, test-alpine]
-    if: |
-      always() && 
-      (needs.test-amazonlinux.result == 'success' || needs.test-alpine.result == 'success')
+    needs: [build-amazonlinux, test-amazonlinux]
     outputs:
       release_url: ${{ steps.release.outputs.release_url }}
       asset_url: ${{ steps.release.outputs.asset_url }}
@@ -273,27 +257,12 @@ jobs:
       - name: Download package
         uses: actions/download-artifact@v4
         with:
-          name: python-package
-
-      - name: Set package info
-        id: pkg
-        run: |
-          if [[ "$DISTRO" == "amazonlinux" ]]; then
-            echo "filename=${{ needs.build-amazonlinux.outputs.package_filename }}" >> $GITHUB_OUTPUT
-            echo "sha256=${{ needs.build-amazonlinux.outputs.package_sha256 }}" >> $GITHUB_OUTPUT
-            echo "platform=linux-rpm-x86_64" >> $GITHUB_OUTPUT
-            echo "distro_name=Amazon Linux 2023" >> $GITHUB_OUTPUT
-          else
-            echo "filename=${{ needs.build-alpine.outputs.package_filename }}" >> $GITHUB_OUTPUT
-            echo "sha256=${{ needs.build-alpine.outputs.package_sha256 }}" >> $GITHUB_OUTPUT
-            echo "platform=linux-alpine-x86_64" >> $GITHUB_OUTPUT
-            echo "distro_name=Alpine Linux 3.19" >> $GITHUB_OUTPUT
-          fi
+          name: python-amazonlinux
 
       - name: Verify package
         run: |
-          ACTUAL_SHA256=$(sha256sum "${{ steps.pkg.outputs.filename }}" | cut -d' ' -f1)
-          if [[ "$ACTUAL_SHA256" != "${{ steps.pkg.outputs.sha256 }}" ]]; then
+          ACTUAL_SHA256=$(sha256sum "${{ needs.build-amazonlinux.outputs.package_filename }}" | cut -d' ' -f1)
+          if [[ "$ACTUAL_SHA256" != "${{ needs.build-amazonlinux.outputs.package_sha256 }}" ]]; then
             echo "ERROR: SHA256 mismatch!"
             exit 1
           fi
@@ -304,15 +273,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_TAG="python-${DISTRO}-${PYTHON_VERSION}"
-          RELEASE_NAME="Python ${PYTHON_VERSION} (${{ steps.pkg.outputs.distro_name }})"
-          PKG_FILE="${{ steps.pkg.outputs.filename }}"
-          PKG_SHA256="${{ steps.pkg.outputs.sha256 }}"
+          RELEASE_TAG="python-amazonlinux-${PYTHON_VERSION}"
+          RELEASE_NAME="Python ${PYTHON_VERSION} (Amazon Linux 2023)"
+          PKG_FILE="${{ needs.build-amazonlinux.outputs.package_filename }}"
+          PKG_SHA256="${{ needs.build-amazonlinux.outputs.package_sha256 }}"
           
           RELEASE_BODY=$(cat <<EOF
-          ## Python ${PYTHON_VERSION} for ${{ steps.pkg.outputs.distro_name }}
+          ## Python ${PYTHON_VERSION} for Amazon Linux 2023
           
-          **Tested on:** Fresh ${{ steps.pkg.outputs.distro_name }} container (no build dependencies)
+          **Tested on:** Fresh Amazon Linux 2023 container (no build dependencies)
           **Install location:** \`/export/apps/citools/python/python-${PYTHON_VERSION}/\`
           **SHA256:** \`${PKG_SHA256}\`
           **Build date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -330,7 +299,7 @@ jobs:
           
           \`\`\`bash
           curl -LO https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PKG_FILE}
-          $(if [[ "$DISTRO" == "amazonlinux" ]]; then echo "rpm -ivh ${PKG_FILE}"; else echo "tar -xzf ${PKG_FILE} -C /"; fi)
+          rpm -ivh ${PKG_FILE}
           /export/apps/citools/python/python-${PYTHON_VERSION}/bin/python3 --version
           \`\`\`
           EOF
@@ -346,13 +315,86 @@ jobs:
           echo "asset_url=${ASSET_URL}" >> $GITHUB_OUTPUT
 
   # =============================================================================
-  # UPDATE INDEX
+  # PUBLISH: Alpine Tarball to GitHub Releases
+  # =============================================================================
+  publish-alpine:
+    name: Publish Alpine Tarball
+    runs-on: ubuntu-latest
+    needs: [build-alpine, test-alpine]
+    outputs:
+      release_url: ${{ steps.release.outputs.release_url }}
+      asset_url: ${{ steps.release.outputs.asset_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: python-alpine
+
+      - name: Verify package
+        run: |
+          ACTUAL_SHA256=$(sha256sum "${{ needs.build-alpine.outputs.package_filename }}" | cut -d' ' -f1)
+          if [[ "$ACTUAL_SHA256" != "${{ needs.build-alpine.outputs.package_sha256 }}" ]]; then
+            echo "ERROR: SHA256 mismatch!"
+            exit 1
+          fi
+          echo "SHA256 verified: $ACTUAL_SHA256"
+
+      - name: Create GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_TAG="python-alpine-${PYTHON_VERSION}"
+          RELEASE_NAME="Python ${PYTHON_VERSION} (Alpine Linux 3.19)"
+          PKG_FILE="${{ needs.build-alpine.outputs.package_filename }}"
+          PKG_SHA256="${{ needs.build-alpine.outputs.package_sha256 }}"
+          
+          RELEASE_BODY=$(cat <<EOF
+          ## Python ${PYTHON_VERSION} for Alpine Linux 3.19
+          
+          **Tested on:** Fresh Alpine Linux 3.19 container (no build dependencies)
+          **Install location:** \`/export/apps/citools/python/python-${PYTHON_VERSION}/\`
+          **SHA256:** \`${PKG_SHA256}\`
+          **Build date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          ### Tests Passed
+          - Version check
+          - Standard library imports (ssl, sqlite3, asyncio, etc.)
+          - SSL/TLS functionality
+          - SQLite operations
+          - File I/O
+          - Subprocess execution
+          - pip available
+          
+          ### Installation
+          
+          \`\`\`bash
+          curl -LO https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PKG_FILE}
+          tar -xzf ${PKG_FILE} -C /
+          /export/apps/citools/python/python-${PYTHON_VERSION}/bin/python3 --version
+          \`\`\`
+          EOF
+          )
+          
+          gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
+          gh release create "$RELEASE_TAG" --title "$RELEASE_NAME" --notes "$RELEASE_BODY" "$PKG_FILE"
+          
+          RELEASE_URL=$(gh release view "$RELEASE_TAG" --json url -q '.url')
+          ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PKG_FILE}"
+          
+          echo "release_url=${RELEASE_URL}" >> $GITHUB_OUTPUT
+          echo "asset_url=${ASSET_URL}" >> $GITHUB_OUTPUT
+
+  # =============================================================================
+  # UPDATE INDEX: Register both releases in database
   # =============================================================================
   update-index:
     name: Update Downloads Index
     runs-on: ubuntu-latest
-    needs: [build-amazonlinux, build-alpine, publish]
-    if: always() && needs.publish.result == 'success'
+    needs: [build-amazonlinux, build-alpine, publish-amazonlinux, publish-alpine]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -371,46 +413,32 @@ jobs:
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           oras pull ghcr.io/${REPO_LOWER}/downloads-db:latest -o . || echo "No existing database"
 
-      - name: Download package for size
+      - name: Download packages for size
         uses: actions/download-artifact@v4
         with:
-          name: python-package
-        continue-on-error: true
+          path: packages
 
-      - name: Set package info
-        id: pkg
-        run: |
-          if [[ "$DISTRO" == "amazonlinux" ]]; then
-            echo "filename=${{ needs.build-amazonlinux.outputs.package_filename }}" >> $GITHUB_OUTPUT
-            echo "sha256=${{ needs.build-amazonlinux.outputs.package_sha256 }}" >> $GITHUB_OUTPUT
-            echo "platform=linux-rpm-x86_64" >> $GITHUB_OUTPUT
-          else
-            echo "filename=${{ needs.build-alpine.outputs.package_filename }}" >> $GITHUB_OUTPUT
-            echo "sha256=${{ needs.build-alpine.outputs.package_sha256 }}" >> $GITHUB_OUTPUT
-            echo "platform=linux-alpine-x86_64" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Insert release record
+      - name: Insert Amazon Linux release record
         run: |
           if [[ ! -f downloads.db ]]; then
             echo "No database to update"
             exit 0
           fi
           
-          RELEASE_TAG="python-${DISTRO}-${PYTHON_VERSION}"
-          RELEASE_URL="${{ needs.publish.outputs.release_url }}"
-          ASSET_URL="${{ needs.publish.outputs.asset_url }}"
-          PKG_FILENAME="${{ steps.pkg.outputs.filename }}"
-          PKG_SHA256="${{ steps.pkg.outputs.sha256 }}"
-          PLATFORM="${{ steps.pkg.outputs.platform }}"
+          RELEASE_TAG="python-amazonlinux-${PYTHON_VERSION}"
+          RELEASE_URL="${{ needs.publish-amazonlinux.outputs.release_url }}"
+          ASSET_URL="${{ needs.publish-amazonlinux.outputs.asset_url }}"
+          PKG_FILENAME="${{ needs.build-amazonlinux.outputs.package_filename }}"
+          PKG_SHA256="${{ needs.build-amazonlinux.outputs.package_sha256 }}"
+          PLATFORM="linux-rpm-x86_64"
           
           MAJOR=$(echo "${PYTHON_VERSION}" | cut -d. -f1)
           MINOR=$(echo "${PYTHON_VERSION}" | cut -d. -f2)
           PATCH=$(echo "${PYTHON_VERSION}" | cut -d. -f3)
           
           FILE_SIZE=0
-          if [[ -f "$PKG_FILENAME" ]]; then
-            FILE_SIZE=$(stat -c%s "$PKG_FILENAME")
+          if [[ -f "packages/python-amazonlinux/$PKG_FILENAME" ]]; then
+            FILE_SIZE=$(stat -c%s "packages/python-amazonlinux/$PKG_FILENAME")
           fi
           
           ARTIFACTS_JSON=$(cat <<EOF
@@ -424,11 +452,56 @@ jobs:
           
           if [[ "$EXISTING" -gt 0 ]]; then
             sqlite3 downloads.db "UPDATE releases SET release_url='${RELEASE_URL}', artifacts='${ARTIFACTS_ESCAPED}', created_at=datetime('now') WHERE release_tag='${RELEASE_TAG}';"
+            echo "Updated existing record for ${RELEASE_TAG}"
           else
             sqlite3 downloads.db "INSERT INTO releases (runtime, version, semver_major, semver_minor, semver_patch, release_tag, release_url, artifacts, created_at) VALUES ('python', '${PYTHON_VERSION}', ${MAJOR}, ${MINOR}, ${PATCH}, '${RELEASE_TAG}', '${RELEASE_URL}', '${ARTIFACTS_ESCAPED}', datetime('now'));"
+            echo "Inserted new record for ${RELEASE_TAG}"
+          fi
+
+      - name: Insert Alpine release record
+        run: |
+          if [[ ! -f downloads.db ]]; then
+            echo "No database to update"
+            exit 0
           fi
           
-          sqlite3 downloads.db "SELECT runtime, version, release_tag FROM releases WHERE release_tag='${RELEASE_TAG}';"
+          RELEASE_TAG="python-alpine-${PYTHON_VERSION}"
+          RELEASE_URL="${{ needs.publish-alpine.outputs.release_url }}"
+          ASSET_URL="${{ needs.publish-alpine.outputs.asset_url }}"
+          PKG_FILENAME="${{ needs.build-alpine.outputs.package_filename }}"
+          PKG_SHA256="${{ needs.build-alpine.outputs.package_sha256 }}"
+          PLATFORM="linux-alpine-x86_64"
+          
+          MAJOR=$(echo "${PYTHON_VERSION}" | cut -d. -f1)
+          MINOR=$(echo "${PYTHON_VERSION}" | cut -d. -f2)
+          PATCH=$(echo "${PYTHON_VERSION}" | cut -d. -f3)
+          
+          FILE_SIZE=0
+          if [[ -f "packages/python-alpine/$PKG_FILENAME" ]]; then
+            FILE_SIZE=$(stat -c%s "packages/python-alpine/$PKG_FILENAME")
+          fi
+          
+          ARTIFACTS_JSON=$(cat <<EOF
+          {"platforms":[{"platform":"${PLATFORM}","platform_os":"linux","platform_arch":"x86_64","binary":{"filename":"${PKG_FILENAME}","size":${FILE_SIZE},"sha256":"${PKG_SHA256}","url":"${ASSET_URL}","uploaded_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}}],"common_files":[],"metadata":{"total_platforms":1,"total_size":${FILE_SIZE}}}
+          EOF
+          )
+          
+          ARTIFACTS_ESCAPED=$(echo "$ARTIFACTS_JSON" | sed "s/'/''/g")
+          
+          EXISTING=$(sqlite3 downloads.db "SELECT COUNT(*) FROM releases WHERE release_tag='${RELEASE_TAG}';")
+          
+          if [[ "$EXISTING" -gt 0 ]]; then
+            sqlite3 downloads.db "UPDATE releases SET release_url='${RELEASE_URL}', artifacts='${ARTIFACTS_ESCAPED}', created_at=datetime('now') WHERE release_tag='${RELEASE_TAG}';"
+            echo "Updated existing record for ${RELEASE_TAG}"
+          else
+            sqlite3 downloads.db "INSERT INTO releases (runtime, version, semver_major, semver_minor, semver_patch, release_tag, release_url, artifacts, created_at) VALUES ('python', '${PYTHON_VERSION}', ${MAJOR}, ${MINOR}, ${PATCH}, '${RELEASE_TAG}', '${RELEASE_URL}', '${ARTIFACTS_ESCAPED}', datetime('now'));"
+            echo "Inserted new record for ${RELEASE_TAG}"
+          fi
+
+      - name: Show database state
+        run: |
+          echo "=== Python releases in database ==="
+          sqlite3 downloads.db "SELECT runtime, version, release_tag, created_at FROM releases WHERE runtime='python' ORDER BY created_at DESC LIMIT 10;"
 
       - name: Push downloads.db
         run: |
