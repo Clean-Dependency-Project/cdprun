@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.14",
+    "releaseDate": "2025-10-06",
+    "eol": "2030-10-31",
+    "lts": false,
+    "recommended": false,
+    "supported": true,
+    "under_review": false
+  },
+  {
     "version": "3.13",
     "releaseDate": "2024-10-07",
     "eol": "2029-10-31",
