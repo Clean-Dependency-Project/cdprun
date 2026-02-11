@@ -76,17 +76,7 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 	// Collect all artifact files BEFORE creating the release
 	// This allows us to skip release creation if there are no artifacts
 	var allArtifactFiles []string
-	var tempScriptsZips []string
 	for _, version := range versions {
-		// Best-effort: include scripts zip for this version.
-		// If scripts/ is missing (e.g., in tests), skip without failing the release.
-		if scriptsZip, err := rm.createScriptsZip(outputDir, version); err != nil {
-			rm.stderr.Warn("failed to create scripts zip", "version", version, "error", err)
-		} else if scriptsZip != "" {
-			tempScriptsZips = append(tempScriptsZips, scriptsZip)
-			allArtifactFiles = append(allArtifactFiles, scriptsZip)
-		}
-
 		artifactFiles, err := rm.collectArtifactFiles(outputDir, runtimeName, version)
 		if err != nil {
 			rm.stderr.Warn("failed to collect artifact files for version", "version", version, "error", err)
@@ -94,13 +84,6 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		}
 		allArtifactFiles = append(allArtifactFiles, artifactFiles...)
 	}
-	defer func() {
-		// Best-effort cleanup of temporary scripts zips.
-		for _, p := range tempScriptsZips {
-			_ = os.Remove(p)
-			_ = os.Remove(filepath.Dir(p))
-		}
-	}()
 
 	// Skip release creation if there are no artifacts to upload
 	if len(allArtifactFiles) == 0 {
@@ -129,6 +112,21 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 	releaseTag := fmt.Sprintf("%s-multi-%s", runtimeName, timestamp)
 	releaseName := fmt.Sprintf("%s (multi) %s", cases.Title(language.English).String(runtimeName), time.Now().UTC().Format("2006-01-02"))
 	releaseBody := rm.generateAggregatedReleaseBody(runtimeName, versions, downloadResults)
+
+	// Best-effort: include a single scripts.zip per release.
+	// If scripts/ is missing (e.g., in tests), skip without failing the release.
+	var scriptsZipPath string
+	if p, err := rm.createScriptsZip(outputDir, "scripts.zip"); err != nil {
+		rm.stderr.Warn("failed to create scripts zip", "error", err)
+	} else if p != "" {
+		scriptsZipPath = p
+		allArtifactFiles = append(allArtifactFiles, scriptsZipPath)
+		// cleanup after upload/buildArtifactsJSON completes
+		defer func() {
+			_ = os.Remove(scriptsZipPath)
+			_ = os.RemoveAll(filepath.Dir(scriptsZipPath))
+		}()
+	}
 
 	// Create GitHub release
 	ghRelease, releaseURL, err := rm.createGitHubRelease(releaseTag, releaseName, releaseBody, releaseConfig.DraftRelease)
@@ -246,11 +244,11 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 	return files, nil
 }
 
-// createScriptsZip creates scripts-{version}.zip from the repo's scripts/ directory.
+// createScriptsZip creates a scripts zip from the repo's scripts/ directory.
 // The archive contains files under the "scripts/" prefix.
 //
 // If scripts/ does not exist (e.g., unit tests), it returns ("", nil).
-func (rm *ReleaseManager) createScriptsZip(outputDir, version string) (string, error) {
+func (rm *ReleaseManager) createScriptsZip(outputDir, zipName string) (string, error) {
 	scriptsDir := "scripts"
 	info, err := os.Stat(scriptsDir)
 	if err != nil {
@@ -265,7 +263,6 @@ func (rm *ReleaseManager) createScriptsZip(outputDir, version string) (string, e
 		return "", nil
 	}
 
-	zipName := fmt.Sprintf("scripts-%s.zip", version)
 	tmpDir, err := os.MkdirTemp("", "cdprun-scripts-")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir for scripts zip: %w", err)
@@ -531,10 +528,19 @@ type fileInfo struct {
 
 // getFileInfo extracts information about a file from its name and download results.
 func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult) (*fileInfo, error) {
-	// scripts-{version}.zip is a common file we attach to releases.
-	if strings.HasPrefix(filename, "scripts-") && strings.HasSuffix(filename, ".zip") {
+	// scripts.zip (release-level) and scripts-{version}.zip (legacy) are common files we attach to releases.
+	if filename == "scripts.zip" || (strings.HasPrefix(filename, "scripts-") && strings.HasSuffix(filename, ".zip")) {
 		return &fileInfo{
 			Type:         "scripts",
+			IsCommonFile: true,
+		}, nil
+	}
+
+	// Tomcat publishes per-artifact checksum files as <artifact>.sha512.
+	// These should not be treated as platform binaries in the index.
+	if strings.HasSuffix(filename, ".sha512") {
+		return &fileInfo{
+			Type:         "checksum_file",
 			IsCommonFile: true,
 		}, nil
 	}
