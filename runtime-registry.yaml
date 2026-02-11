@@ -105,3 +105,47 @@ runtimes:
      github_repository: "Clean-Dependency-Project/cdprun"
      draft_release: false
      release_name_template: "Node.js Runtime Binaries - {version}"
+  tomcat:
+    enabled: true
+    name: "Apache Tomcat"
+    description: "Apache Tomcat is an open source implementation of the Java Servlet, JavaServer Pages, Java Expression Language and Java WebSocket technologies"
+    endoflife_product: "tomcat"
+    policy_file: "policies/tomcat-policy.json"
+    version_pattern: "major_minor"
+    supported_architectures:
+      - "x64"
+      - "x86"
+    supported_platforms:
+      - os: "windows"
+        arch: ["x64", "x86"]
+        file_extension: "zip"
+        download_name: "windows"
+      - os: "linux"
+        arch: ["x64"]
+        file_extension: "tar.gz"
+        download_name: "linux"
+    download:
+      base_url: "https://archive.apache.org/dist/tomcat"
+      url_pattern: "{base_url}/tomcat-{major}/v{version}/bin/apache-tomcat-{version}.{ext}"
+      user_agent: "cdprun/1.0 (Tomcat)"
+      requires_auth: false
+    verification:
+      enabled: true
+      methods:
+        checksum:
+          enabled: true
+          algorithm: "sha512"
+          file_pattern: "{url}.sha512"
+          remote_checksum: true
+        gpg:
+          enabled: true
+          signature_pattern: ".asc"
+    endoflife:
+      product_name: "tomcat"
+      check_eol: true
+      warn_on_eol: true
+    release:
+      auto_release: true
+      github_repository: "Clean-Dependency-Project/cdprun"
+      draft_release: false
+      release_name_template: "Apache Tomcat Runtime Binaries - {version}"

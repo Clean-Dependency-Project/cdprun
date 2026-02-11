@@ -32,13 +32,13 @@ type ReleaseArtifacts struct {
 
 // PlatformArtifact represents all artifacts for a specific platform (e.g., linux-x64).
 type PlatformArtifact struct {
-	Platform     string            `json:"platform"`      // e.g., "linux-x64"
-	PlatformOS   string            `json:"platform_os"`   // e.g., "linux"
-	PlatformArch string            `json:"platform_arch"` // e.g., "x64"
-	Binary       *ArtifactFile     `json:"binary"`
-	Audit        *AuditArtifact    `json:"audit"`
-	Signature    *ArtifactFile     `json:"signature,omitempty"`    // Cosign .sig file
-	Certificate  *ArtifactFile     `json:"certificate,omitempty"`  // Cosign .cert file
+	Platform     string         `json:"platform"`      // e.g., "linux-x64"
+	PlatformOS   string         `json:"platform_os"`   // e.g., "linux"
+	PlatformArch string         `json:"platform_arch"` // e.g., "x64"
+	Binary       *ArtifactFile  `json:"binary"`
+	Audit        *AuditArtifact `json:"audit"`
+	Signature    *ArtifactFile  `json:"signature,omitempty"`   // Cosign .sig file
+	Certificate  *ArtifactFile  `json:"certificate,omitempty"` // Cosign .cert file
 }
 
 // ArtifactFile represents a single file artifact (binary, signature, certificate).
@@ -66,6 +66,7 @@ type CommonFile struct {
 	Type       string    `json:"type"` // e.g., "checksum_file", "checksum_signature"
 	Filename   string    `json:"filename"`
 	Size       int64     `json:"size"`
+	SHA256     string    `json:"sha256,omitempty"`
 	URL        string    `json:"url"`
 	UploadedAt time.Time `json:"uploaded_at"`
 }
@@ -168,4 +169,3 @@ type ArtifactsMetadata struct {
 //     "all_checksums_verified": true
 //   }
 // }
-

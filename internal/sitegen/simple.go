@@ -19,6 +19,13 @@ type SimpleArtifactEntry struct {
 	Version  string `json:"version"`
 }
 
+// ScriptsArtifactEntry represents a non-platform-specific scripts archive in python/index.json.
+type ScriptsArtifactEntry struct {
+	Version string `json:"version"`
+	Binary  string `json:"binary"`
+	SHA256  string `json:"sha256,omitempty"`
+}
+
 // SimpleVersionIndex represents a version-specific JSON index nested by OS.
 type SimpleVersionIndex map[string][]SimpleArtifactEntry
 
@@ -58,9 +65,25 @@ func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *sl
 
 	// Render runtime-level JSON index containing all versions for this runtime
 	runtimeIndex := collectRuntimeArtifactIndex(runtime)
-	jsonData, err := json.MarshalIndent(runtimeIndex, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to serialize runtime artifact index: %w", err)
+	var jsonData []byte
+	if runtime.Name == "python" {
+		out := make(map[string]any, len(runtimeIndex)+1)
+		for k, v := range runtimeIndex {
+			out[k] = v
+		}
+		out["scripts"] = collectScriptsIndex(runtime)
+
+		var err error
+		jsonData, err = json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to serialize python runtime artifact index: %w", err)
+		}
+	} else {
+		var err error
+		jsonData, err = json.MarshalIndent(runtimeIndex, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to serialize runtime artifact index: %w", err)
+		}
 	}
 
 	jsonPath := filepath.Join(runtimeDir, "index.json")
@@ -77,6 +100,46 @@ func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *sl
 
 	logger.Debug("rendered runtime pages", "runtime", runtime.Name, "major_versions", len(majorVersions), "os_groups", len(runtimeIndex))
 	return nil
+}
+
+func collectScriptsIndex(runtime RuntimeModel) []ScriptsArtifactEntry {
+	seen := make(map[string]bool)
+	var entries []ScriptsArtifactEntry
+
+	for _, platform := range runtime.Platforms {
+		for _, version := range platform.Versions {
+			for _, release := range version.Releases {
+				if release.ReleaseTag == "" {
+					continue
+				}
+				for _, cf := range release.CommonFiles {
+					if cf.Type != "scripts" || cf.Filename == "" {
+						continue
+					}
+					binary := fmt.Sprintf("%s/%s", release.ReleaseTag, cf.Filename)
+					if seen[binary] {
+						continue
+					}
+					seen[binary] = true
+
+					entries = append(entries, ScriptsArtifactEntry{
+						Version: version.Version,
+						Binary:  binary,
+						SHA256:  cf.SHA256,
+					})
+				}
+			}
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Version == entries[j].Version {
+			return entries[i].Binary < entries[j].Binary
+		}
+		return entries[i].Version < entries[j].Version
+	})
+
+	return entries
 }
 
 // collectMajorVersions collects unique major versions from a runtime.

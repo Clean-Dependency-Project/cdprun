@@ -426,7 +426,7 @@ func TestGenerateReleaseBody(t *testing.T) {
 		t.Error("Release body should not include failed download (windows-x64)")
 	}
 
-	if !strings.Contains(body, "Checksum verified") {
+	if !strings.Contains(body, "checksum verified") {
 		t.Error("Release body missing verification info")
 	}
 

@@ -17,3 +17,9 @@ nodejs:
     aarch64:
       - "18"   # Node.js 18.x is not available for Windows ARM64
 
+tomcat:
+  # Tomcat 11+ dropped 32-bit Windows support
+  windows:
+    x86:
+      - "11"
+
