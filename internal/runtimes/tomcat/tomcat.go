@@ -241,7 +241,7 @@ func (t *TomcatAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 		"version", versionStr,
 		"platforms", len(platforms))
 
-	// ✅ PROACTIVE: Query available files from upstream first
+	// Proactively query available files from upstream first
 	release, err := t.getAvailableFiles(versionStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Tomcat release info for version %s: %w", versionStr, err)
@@ -252,7 +252,7 @@ func (t *TomcatAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 	availablePlatforms := t.getAvailablePlatforms(release)
 
 	for _, plat := range platforms {
-		// ✅ PROACTIVE: Check if file exists BEFORE creating download task
+		// Check if file exists before creating download task
 		file := t.findFileForPlatform(release, plat)
 		if file == nil {
 			// Track the skip for reporting
@@ -264,7 +264,7 @@ func (t *TomcatAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 			}
 			proactiveSkips = append(proactiveSkips, skip)
 
-			t.stderr.Warn("⚠️ no Tomcat binary found for platform",
+			t.stderr.Warn("no Tomcat binary found for platform",
 				"platform", fmt.Sprintf("%s-%s", plat.OS, plat.Arch),
 				"requested_version", version.Version,
 				"available_platforms", availablePlatforms,
@@ -366,7 +366,7 @@ func (t *TomcatAdapter) ProcessDownloads(ctx context.Context, tasks []runtime.Do
 	for _, result := range results {
 		if result.Error != nil {
 			failureCount++
-			// ✅ CLEAN: No more reactive error checking - problems are prevented upfront
+			// No reactive error checking - problems are prevented upfront
 			t.stderr.Error("download failed",
 				"url", result.URL,
 				"error", result.Error)
@@ -507,24 +507,6 @@ func (t *TomcatAdapter) extractMajorVersion(ver string) string {
 		parts := strings.Split(ver, ".")
 		if len(parts) > 0 {
 			return parts[0]
-		}
-		return ver
-	}
-	return extracted
-}
-
-// extractMajorMinorVersion extracts major.minor from a full version string using semver
-func (t *TomcatAdapter) extractMajorMinorVersion(ver string) string {
-	extracted, err := t.versionValidator.ExtractPattern(ver, version.PatternMajorMinor)
-	if err != nil {
-		// Fallback to manual parsing for backward compatibility
-		t.stderr.Debug("semver extraction failed, falling back to manual parsing",
-			"version", ver,
-			"pattern", "major_minor",
-			"error", err)
-		parts := strings.Split(ver, ".")
-		if len(parts) >= 2 {
-			return fmt.Sprintf("%s.%s", parts[0], parts[1])
 		}
 		return ver
 	}

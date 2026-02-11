@@ -327,7 +327,9 @@ func (rm *ReleaseManager) createScriptsZip(outputDir, version string) (string, e
 		}
 		return nil
 	}); err != nil {
-		_ = zw.Close()
+		if closeErr := zw.Close(); closeErr != nil {
+			rm.stderr.Warn("failed to close zip writer after error", "error", closeErr)
+		}
 		return "", cleanup(fmt.Errorf("walk scripts dir: %w", err))
 	}
 	if err := zw.Close(); err != nil {
@@ -685,11 +687,11 @@ func (rm *ReleaseManager) generateAggregatedReleaseBody(runtime string, versions
 	// Verification section
 	body += "\n## Verification\n\n"
 	body += "All binaries have been:\n"
-	body += "- ✓ Checksum verified\n"
+	body += "- checksum verified\n"
 	if !hasGPGFailure {
-		body += "- ✓ GPG signature verified\n"
+		body += "- GPG signature verified\n"
 	}
-	body += "- ✓ ClamAV scanned\n"
+	body += "- ClamAV scanned\n"
 
 	return body
 }

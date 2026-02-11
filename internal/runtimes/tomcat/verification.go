@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	_ "embed"
-
 	"github.com/clean-dependency-project/cdprun/internal/config"
 	"github.com/clean-dependency-project/cdprun/internal/gpg"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
@@ -85,7 +83,9 @@ func (v *TomcatVerificationStrategy) Verify(ctx context.Context, result runtime.
 		verificationStatus = "failed"
 		checksumVerified = false
 		// Create audit file for failed verification
-		v.createIndividualAuditFile(result, checksumVerified, gpgVerified, verificationStatus, errorMsg)
+		if auditErr := v.createIndividualAuditFile(result, checksumVerified, gpgVerified, verificationStatus, errorMsg); auditErr != nil {
+			v.stderr.Warn("failed to create audit file", "file", result.LocalPath, "error", auditErr)
+		}
 		return fmt.Errorf("SHA512 verification failed: %w", err)
 	}
 	checksumVerified = true
