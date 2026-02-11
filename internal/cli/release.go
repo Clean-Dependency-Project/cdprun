@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -75,7 +76,17 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 	// Collect all artifact files BEFORE creating the release
 	// This allows us to skip release creation if there are no artifacts
 	var allArtifactFiles []string
+	var tempScriptsZips []string
 	for _, version := range versions {
+		// Best-effort: include scripts zip for this version.
+		// If scripts/ is missing (e.g., in tests), skip without failing the release.
+		if scriptsZip, err := rm.createScriptsZip(outputDir, version); err != nil {
+			rm.stderr.Warn("failed to create scripts zip", "version", version, "error", err)
+		} else if scriptsZip != "" {
+			tempScriptsZips = append(tempScriptsZips, scriptsZip)
+			allArtifactFiles = append(allArtifactFiles, scriptsZip)
+		}
+
 		artifactFiles, err := rm.collectArtifactFiles(outputDir, runtimeName, version)
 		if err != nil {
 			rm.stderr.Warn("failed to collect artifact files for version", "version", version, "error", err)
@@ -83,6 +94,13 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		}
 		allArtifactFiles = append(allArtifactFiles, artifactFiles...)
 	}
+	defer func() {
+		// Best-effort cleanup of temporary scripts zips.
+		for _, p := range tempScriptsZips {
+			_ = os.Remove(p)
+			_ = os.Remove(filepath.Dir(p))
+		}
+	}()
 
 	// Skip release creation if there are no artifacts to upload
 	if len(allArtifactFiles) == 0 {
@@ -228,10 +246,112 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 	return files, nil
 }
 
+// createScriptsZip creates scripts-{version}.zip from the repo's scripts/ directory.
+// The archive contains files under the "scripts/" prefix.
+//
+// If scripts/ does not exist (e.g., unit tests), it returns ("", nil).
+func (rm *ReleaseManager) createScriptsZip(outputDir, version string) (string, error) {
+	scriptsDir := "scripts"
+	info, err := os.Stat(scriptsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			rm.stdout.Debug("scripts directory not found, skipping scripts zip", "scripts_dir", scriptsDir)
+			return "", nil
+		}
+		return "", fmt.Errorf("stat scripts directory: %w", err)
+	}
+	if !info.IsDir() {
+		rm.stdout.Debug("scripts path is not a directory, skipping scripts zip", "scripts_dir", scriptsDir)
+		return "", nil
+	}
+
+	zipName := fmt.Sprintf("scripts-%s.zip", version)
+	tmpDir, err := os.MkdirTemp("", "cdprun-scripts-")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir for scripts zip: %w", err)
+	}
+
+	finalPath := filepath.Join(tmpDir, zipName)
+	tmpFile, err := os.CreateTemp(tmpDir, zipName+".tmp-*")
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("create temp zip: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	cleanup := func(closeErr error) error {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		_ = os.RemoveAll(tmpDir)
+		return closeErr
+	}
+
+	zw := zip.NewWriter(tmpFile)
+	if err := filepath.WalkDir(scriptsDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(scriptsDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		hdr, err := zip.FileInfoHeader(fi)
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(filepath.Join("scripts", rel))
+		hdr.Method = zip.Deflate
+
+		w, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+
+		if _, err := io.Copy(w, f); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		_ = zw.Close()
+		return "", cleanup(fmt.Errorf("walk scripts dir: %w", err))
+	}
+	if err := zw.Close(); err != nil {
+		return "", cleanup(fmt.Errorf("close zip writer: %w", err))
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", cleanup(fmt.Errorf("close temp file: %w", err))
+	}
+
+	// Replace existing zip if present.
+	_ = os.Remove(finalPath)
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return "", cleanup(fmt.Errorf("rename scripts zip into place: %w", err))
+	}
+
+	rm.stdout.Debug("created scripts zip", "file", finalPath)
+	return finalPath, nil
+}
+
 // artifactInfo contains metadata about an uploaded artifact.
 type artifactInfo struct {
 	URL    string
 	SHA256 string
+	Size   int64
 }
 
 // calculateFileSHA256 computes the SHA256 hash of a file.
@@ -259,6 +379,13 @@ func (rm *ReleaseManager) uploadArtifacts(releaseID int64, files []string) (map[
 		filename := filepath.Base(filePath)
 		rm.stdout.Info("uploading artifact", "file", filename)
 
+		var size int64
+		if fi, err := os.Stat(filePath); err == nil {
+			size = fi.Size()
+		} else {
+			rm.stderr.Warn("failed to stat file before upload", "file", filename, "error", err)
+		}
+
 		// Calculate SHA256 before upload
 		sha256Hash, err := calculateFileSHA256(filePath)
 		if err != nil {
@@ -275,6 +402,7 @@ func (rm *ReleaseManager) uploadArtifacts(releaseID int64, files []string) (map[
 		uploaded[filename] = artifactInfo{
 			URL:    downloadURL,
 			SHA256: sha256Hash,
+			Size:   size,
 		}
 
 		rm.stdout.Info("artifact uploaded", "file", filename, "url", downloadURL, "sha256", sha256Hash)
@@ -300,10 +428,15 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 		}
 
 		if fileInfo.IsCommonFile {
+			size := fileInfo.Size
+			if size == 0 {
+				size = info.Size
+			}
 			commonFiles = append(commonFiles, storage.CommonFile{
 				Type:       fileInfo.Type,
 				Filename:   filename,
-				Size:       fileInfo.Size,
+				Size:       size,
+				SHA256:     info.SHA256,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
 			})
@@ -396,6 +529,14 @@ type fileInfo struct {
 
 // getFileInfo extracts information about a file from its name and download results.
 func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult) (*fileInfo, error) {
+	// scripts-{version}.zip is a common file we attach to releases.
+	if strings.HasPrefix(filename, "scripts-") && strings.HasSuffix(filename, ".zip") {
+		return &fileInfo{
+			Type:         "scripts",
+			IsCommonFile: true,
+		}, nil
+	}
+
 	// Check if it's a common file (checksum, signature)
 	if strings.Contains(filename, "SHASUMS") || strings.Contains(filename, "checksums") {
 		return &fileInfo{

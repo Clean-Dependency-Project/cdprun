@@ -20,6 +20,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
+	tomcatAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/tomcat"
 	"github.com/clean-dependency-project/cdprun/internal/sitegen"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
@@ -84,7 +85,7 @@ func NewApp() *cli.App {
 				&cli.StringFlag{
 					Name:    "runtime",
 					Aliases: []string{"r"},
-					Usage:   "runtime name (nodejs, python). If not specified, downloads all enabled runtimes from config",
+					Usage:   "runtime name (nodejs, python, tomcat). If not specified, downloads all enabled runtimes from config",
 				},
 					&cli.StringFlag{
 						Name:    "version",
@@ -185,6 +186,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 			adapter := pythonAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("python", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register python adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
+		case "tomcat":
+			adapter := tomcatAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("tomcat", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register tomcat adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,

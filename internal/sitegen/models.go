@@ -9,7 +9,7 @@ type SiteModel struct {
 
 // RuntimeModel represents all data for a specific runtime (e.g., nodejs, python).
 type RuntimeModel struct {
-	Name     string
+	Name      string
 	Platforms []PlatformModel
 }
 
@@ -34,6 +34,16 @@ type ReleaseModel struct {
 	ReleaseURL  string
 	CreatedAt   time.Time
 	Artifacts   []ArtifactModel
+	CommonFiles []CommonFileModel
+}
+
+// CommonFileModel represents a release-level file (not platform-specific).
+type CommonFileModel struct {
+	Type     string
+	Filename string
+	Size     int64
+	SHA256   string
+	URL      string
 }
 
 // ArtifactModel represents a single downloadable artifact.
@@ -57,7 +67,7 @@ type FileModel struct {
 
 // SimplePackageModel represents a PEP 503 package with all its distributions.
 type SimplePackageModel struct {
-	Name         string // Normalized package name (e.g., "nodejs-linux-x64")
+	Name          string // Normalized package name (e.g., "nodejs-linux-x64")
 	Distributions []DistributionModel
 }
 
@@ -67,4 +77,3 @@ type DistributionModel struct {
 	URL      string
 	SHA256   string // Included in URL fragment as #sha256=<hash>
 }
-

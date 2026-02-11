@@ -65,7 +65,7 @@ func buildRuntimeModel(runtimeName string, osMap map[string]map[int]map[int]map[
 	for _, osName := range sortedOSKeys(osMap) {
 		platformModels = append(platformModels, buildPlatformModel(osName, osMap[osName]))
 	}
-	
+
 	return RuntimeModel{
 		Name:      runtimeName,
 		Platforms: platformModels,
@@ -75,14 +75,14 @@ func buildRuntimeModel(runtimeName string, osMap map[string]map[int]map[int]map[
 // buildPlatformModel builds a PlatformModel from the version map.
 func buildPlatformModel(osName string, majorMap map[int]map[int]map[int][]ReleaseWithArtifacts) PlatformModel {
 	var versionModels []VersionModel
-	
+
 	// Sort major versions descending (newest first)
 	majorVersions := sortedIntKeys(majorMap)
 	for i := len(majorVersions) - 1; i >= 0; i-- {
 		major := majorVersions[i]
 		versionModels = append(versionModels, buildVersionModels(major, majorMap[major], osName)...)
 	}
-	
+
 	return PlatformModel{
 		OS:       osName,
 		Versions: versionModels,
@@ -92,38 +92,38 @@ func buildPlatformModel(osName string, majorMap map[int]map[int]map[int][]Releas
 // buildVersionModels builds VersionModels for a major version.
 func buildVersionModels(major int, minorMap map[int]map[int][]ReleaseWithArtifacts, osName string) []VersionModel {
 	var versionModels []VersionModel
-	
+
 	// Sort minor versions descending (newest first)
 	minorVersions := sortedIntKeys(minorMap)
 	for i := len(minorVersions) - 1; i >= 0; i-- {
 		minor := minorVersions[i]
 		versionModels = append(versionModels, buildPatchVersionModels(major, minor, minorMap[minor], osName)...)
 	}
-	
+
 	return versionModels
 }
 
 // buildPatchVersionModels builds VersionModels for a major.minor version.
 func buildPatchVersionModels(major, minor int, patchMap map[int][]ReleaseWithArtifacts, osName string) []VersionModel {
 	var versionModels []VersionModel
-	
+
 	// Sort patch versions descending (newest first)
 	patchVersions := sortedIntKeys(patchMap)
 	for i := len(patchVersions) - 1; i >= 0; i-- {
 		patch := patchVersions[i]
 		releases := patchMap[patch]
-		
+
 		// Sort releases by created_at descending
 		sort.Slice(releases, func(i, j int) bool {
 			return releases[i].Release.CreatedAt.After(releases[j].Release.CreatedAt)
 		})
-		
+
 		var releaseModels []ReleaseModel
 		for _, rel := range releases {
 			// Filter artifacts to only include those matching this OS
 			releaseModels = append(releaseModels, buildReleaseModelForOS(rel, osName))
 		}
-		
+
 		versionModels = append(versionModels, VersionModel{
 			Major:    major,
 			Minor:    minor,
@@ -132,7 +132,7 @@ func buildPatchVersionModels(major, minor int, patchMap map[int][]ReleaseWithArt
 			Releases: releaseModels,
 		})
 	}
-	
+
 	return versionModels
 }
 
@@ -195,11 +195,26 @@ func buildReleaseModelForOS(rel ReleaseWithArtifacts, osFilter string) ReleaseMo
 		artifacts = append(artifacts, artifact)
 	}
 
+	var commonFiles []CommonFileModel
+	if len(rel.Artifacts.CommonFiles) > 0 {
+		commonFiles = make([]CommonFileModel, 0, len(rel.Artifacts.CommonFiles))
+		for _, cf := range rel.Artifacts.CommonFiles {
+			commonFiles = append(commonFiles, CommonFileModel{
+				Type:     cf.Type,
+				Filename: cf.Filename,
+				Size:     cf.Size,
+				SHA256:   cf.SHA256,
+				URL:      cf.URL,
+			})
+		}
+	}
+
 	return ReleaseModel{
-		ReleaseTag: rel.Release.ReleaseTag,
-		ReleaseURL: rel.Release.ReleaseURL,
-		CreatedAt:  rel.Release.CreatedAt,
-		Artifacts:  artifacts,
+		ReleaseTag:  rel.Release.ReleaseTag,
+		ReleaseURL:  rel.Release.ReleaseURL,
+		CreatedAt:   rel.Release.CreatedAt,
+		Artifacts:   artifacts,
+		CommonFiles: commonFiles,
 	}
 }
 
@@ -257,4 +272,3 @@ func sortedIntKeys[T any](m map[int]T) []int {
 	sort.Ints(keys)
 	return keys
 }
-
