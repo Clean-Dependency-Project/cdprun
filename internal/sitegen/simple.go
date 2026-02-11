@@ -19,11 +19,11 @@ type SimpleArtifactEntry struct {
 	Version  string `json:"version"`
 }
 
-// ScriptsArtifactEntry represents a non-platform-specific scripts archive in python/index.json.
+// ScriptsArtifactEntry represents a non-platform-specific scripts archive included in every runtime index.json.
 type ScriptsArtifactEntry struct {
-	Version string `json:"version"`
-	Binary  string `json:"binary"`
-	SHA256  string `json:"sha256,omitempty"`
+	ReleaseTag string `json:"release_tag"`
+	Binary     string `json:"binary"`
+	SHA256     string `json:"sha256,omitempty"`
 }
 
 // SimpleVersionIndex represents a version-specific JSON index nested by OS.
@@ -41,9 +41,12 @@ func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) err
 		return fmt.Errorf("failed to render simple root index: %w", err)
 	}
 
+	// Collect scripts index once (searches all runtimes).
+	scriptsIndex := collectScriptsIndex(model)
+
 	// Render pages for each runtime
 	for _, runtime := range model.Runtimes {
-		if err := renderSimpleRuntimePages(runtime, simpleDir, logger); err != nil {
+		if err := renderSimpleRuntimePages(runtime, scriptsIndex, simpleDir, logger); err != nil {
 			return fmt.Errorf("failed to render pages for %s: %w", runtime.Name, err)
 		}
 	}
@@ -52,7 +55,8 @@ func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) err
 }
 
 // renderSimpleRuntimePages renders /simple/<runtime>/index.html and version pages.
-func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *slog.Logger) error {
+// scriptsIndex is pre-collected across all runtimes so every runtime index includes it.
+func renderSimpleRuntimePages(runtime RuntimeModel, scriptsIndex []ScriptsArtifactEntry, simpleDir string, logger *slog.Logger) error {
 	runtimeDir := filepath.Join(simpleDir, runtime.Name)
 
 	// Collect unique major versions
@@ -63,27 +67,19 @@ func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *sl
 		return err
 	}
 
-	// Render runtime-level JSON index containing all versions for this runtime
+	// Render runtime-level JSON index containing all versions for this runtime.
+	// Every runtime gets a "scripts" key so consumers can discover scripts.zip
+	// regardless of which runtime index they query.
 	runtimeIndex := collectRuntimeArtifactIndex(runtime)
-	var jsonData []byte
-	if runtime.Name == "python" {
-		out := make(map[string]any, len(runtimeIndex)+1)
-		for k, v := range runtimeIndex {
-			out[k] = v
-		}
-		out["scripts"] = collectScriptsIndex(runtime)
+	out := make(map[string]any, len(runtimeIndex)+1)
+	for k, v := range runtimeIndex {
+		out[k] = v
+	}
+	out["scripts"] = scriptsIndex
 
-		var err error
-		jsonData, err = json.MarshalIndent(out, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to serialize python runtime artifact index: %w", err)
-		}
-	} else {
-		var err error
-		jsonData, err = json.MarshalIndent(runtimeIndex, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to serialize runtime artifact index: %w", err)
-		}
+	jsonData, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize runtime artifact index: %w", err)
 	}
 
 	jsonPath := filepath.Join(runtimeDir, "index.json")
@@ -102,41 +98,43 @@ func renderSimpleRuntimePages(runtime RuntimeModel, simpleDir string, logger *sl
 	return nil
 }
 
-func collectScriptsIndex(runtime RuntimeModel) []ScriptsArtifactEntry {
+// collectScriptsIndex searches all runtimes for scripts common files.
+// scripts.zip is attached to whichever release runs first (could be any runtime),
+// so we must scan globally to find them all.
+func collectScriptsIndex(model *SiteModel) []ScriptsArtifactEntry {
 	seen := make(map[string]bool)
 	var entries []ScriptsArtifactEntry
 
-	for _, platform := range runtime.Platforms {
-		for _, version := range platform.Versions {
-			for _, release := range version.Releases {
-				if release.ReleaseTag == "" {
-					continue
-				}
-				for _, cf := range release.CommonFiles {
-					if cf.Type != "scripts" || cf.Filename == "" {
+	for _, rt := range model.Runtimes {
+		for _, platform := range rt.Platforms {
+			for _, version := range platform.Versions {
+				for _, release := range version.Releases {
+					if release.ReleaseTag == "" {
 						continue
 					}
-					binary := fmt.Sprintf("%s/%s", release.ReleaseTag, cf.Filename)
-					if seen[binary] {
-						continue
-					}
-					seen[binary] = true
+					for _, cf := range release.CommonFiles {
+						if cf.Type != "scripts" || cf.Filename == "" {
+							continue
+						}
+						binary := fmt.Sprintf("%s/%s", release.ReleaseTag, cf.Filename)
+						if seen[binary] {
+							continue
+						}
+						seen[binary] = true
 
-					entries = append(entries, ScriptsArtifactEntry{
-						Version: version.Version,
-						Binary:  binary,
-						SHA256:  cf.SHA256,
-					})
+						entries = append(entries, ScriptsArtifactEntry{
+							ReleaseTag: release.ReleaseTag,
+							Binary:     binary,
+							SHA256:     cf.SHA256,
+						})
+					}
 				}
 			}
 		}
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].Version == entries[j].Version {
-			return entries[i].Binary < entries[j].Binary
-		}
-		return entries[i].Version < entries[j].Version
+		return entries[i].Binary < entries[j].Binary
 	})
 
 	return entries
