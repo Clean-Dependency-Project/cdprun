@@ -916,9 +916,18 @@ func TestRenderSimpleIndex(t *testing.T) {
 	if len(index["linux"]) != 1 {
 		t.Fatalf("JSON artifact index for linux length = %d, want 1", len(index["linux"]))
 	}
-	expected := "nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz"
+	expected := "linux/nodejs/22.15/22.15.0/node-v22.15.0-linux-x64.tar.gz"
 	if index["linux"][0].Binary != expected {
 		t.Errorf("JSON artifact entry = %q, want %q", index["linux"][0].Binary, expected)
+	}
+	if index["linux"][0].Type != "tar.gz" {
+		t.Errorf("JSON artifact type = %q, want %q", index["linux"][0].Type, "tar.gz")
+	}
+	if index["linux"][0].SourcePath != "nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz" {
+		t.Errorf("JSON artifact source_path = %q, want %q", index["linux"][0].SourcePath, "nodejs-22.15.0/node-v22.15.0-linux-x64.tar.gz")
+	}
+	if index["linux"][0].DownloadURL != "https://example.com/binary.tar.gz" {
+		t.Errorf("JSON artifact download_url = %q, want %q", index["linux"][0].DownloadURL, "https://example.com/binary.tar.gz")
 	}
 	if index["linux"][0].Version != "22.15.0" {
 		t.Errorf("JSON artifact version = %q, want %q", index["linux"][0].Version, "22.15.0")
@@ -938,6 +947,9 @@ func TestRenderSimpleIndex(t *testing.T) {
 
 	if len(runtimeIndex["linux"]) != 1 {
 		t.Fatalf("Runtime JSON index for linux length = %d, want 1", len(runtimeIndex["linux"]))
+	}
+	if runtimeIndex["linux"][0].Binary != expected {
+		t.Errorf("Runtime JSON entry = %q, want %q", runtimeIndex["linux"][0].Binary, expected)
 	}
 	if runtimeIndex["linux"][0].Version != "22.15.0" {
 		t.Errorf("Runtime JSON artifact version = %q, want %q", runtimeIndex["linux"][0].Version, "22.15.0")
@@ -1064,6 +1076,7 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 								Versions: []VersionModel{
 									{
 										Major:   22,
+										Minor:   15,
 										Version: "22.15.0",
 										Releases: []ReleaseModel{
 											{
@@ -1080,6 +1093,7 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 									},
 									{
 										Major:   20,
+										Minor:   11,
 										Version: "20.11.0",
 										Releases: []ReleaseModel{
 											{
@@ -1105,8 +1119,8 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 				version string
 			}{
 				"linux": {
-					{"nodejs-v20.11.0/node-v20.11.0-linux-x64.tar.xz", "20.11.0"},
-					{"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz", "22.15.0"},
+					{"linux/nodejs/20.11/20.11.0/node-v20.11.0-linux-x64.tar.xz", "20.11.0"},
+					{"linux/nodejs/22.15/22.15.0/node-v22.15.0-linux-x64.tar.xz", "22.15.0"},
 				},
 			},
 		},
@@ -1122,6 +1136,7 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 								Versions: []VersionModel{
 									{
 										Major:   22,
+										Minor:   15,
 										Version: "22.15.0",
 										Releases: []ReleaseModel{
 											{
@@ -1148,6 +1163,7 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 								Versions: []VersionModel{
 									{
 										Major:   3,
+										Minor:   13,
 										Version: "3.13.0",
 										Releases: []ReleaseModel{
 											{
@@ -1173,8 +1189,8 @@ func TestCollectAllArtifactIndex(t *testing.T) {
 				version string
 			}{
 				"linux": {
-					{"nodejs-v22.15.0/node-v22.15.0-linux-x64.tar.xz", "22.15.0"},
-					{"python-v3.13.0/python-3.13.0-linux-x64.tar.gz", "3.13.0"},
+					{"linux/nodejs/22.15/22.15.0/node-v22.15.0-linux-x64.tar.xz", "22.15.0"},
+					{"linux/python/3.13/3.13.0/python-3.13.0-linux-x64.tar.gz", "3.13.0"},
 				},
 			},
 		},
