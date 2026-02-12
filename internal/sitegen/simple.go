@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"log/slog"
 )
@@ -13,10 +15,34 @@ import (
 // SimpleArtifactEntry represents a single artifact in the JSON index.
 type SimpleArtifactEntry struct {
 	Platform string `json:"platform"`
+	Type     string `json:"type"`
 	Binary   string `json:"binary"`
-	SHA256   string `json:"sha256,omitempty"`
-	Audit    string `json:"audit,omitempty"`
-	Version  string `json:"version"`
+	// SourcePath keeps the pre-reorg layout (<release_tag>/<filename>) so consumers
+	// can still locate artifacts by GitHub release tag if needed.
+	SourcePath string `json:"source_path"`
+	// DownloadURL is the full GitHub release download URL for this artifact.
+	DownloadURL string `json:"download_url"`
+	SHA256      string `json:"sha256,omitempty"`
+	Audit       string `json:"audit,omitempty"`
+	Version     string `json:"version"`
+}
+
+func artifactTypeFromFilename(filename string) string {
+	lower := strings.ToLower(filename)
+	// Multi-part extensions first.
+	for _, ext := range []string{
+		".tar.xz",
+		".tar.gz",
+		".tar.bz2",
+		".tar.zst",
+		".tgz",
+	} {
+		if strings.HasSuffix(lower, ext) {
+			return strings.TrimPrefix(ext, ".")
+		}
+	}
+	ext := path.Ext(lower)
+	return strings.TrimPrefix(ext, ".")
 }
 
 // ScriptsArtifactEntry represents a non-platform-specific scripts archive included in every runtime index.json.
@@ -254,6 +280,7 @@ func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logge
 // collectArtifactIndexByMajor returns nested artifact index for the given runtime/major.
 func collectArtifactIndexByMajor(runtime RuntimeModel, major int) SimpleVersionIndex {
 	index := make(SimpleVersionIndex)
+	seen := make(map[string]bool)
 
 	for _, platform := range runtime.Platforms {
 		os := normalizeOS(platform.OS)
@@ -268,11 +295,29 @@ func collectArtifactIndexByMajor(runtime RuntimeModel, major int) SimpleVersionI
 						continue
 					}
 
+					destBinary := fmt.Sprintf(
+						"%s/%s/%d.%d/%s/%s",
+						os,
+						runtime.Name,
+						version.Major,
+						version.Minor,
+						version.Version,
+						artifact.Binary.Filename,
+					)
+					if seen[destBinary] {
+						continue
+					}
+					seen[destBinary] = true
+
+					sourcePath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
 					entry := SimpleArtifactEntry{
-						Platform: artifact.Platform,
-						Binary:   fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename),
-						SHA256:   artifact.Binary.SHA256,
-						Version:  version.Version,
+						Platform:    artifact.Platform,
+						Type:        artifactTypeFromFilename(artifact.Binary.Filename),
+						Binary:      destBinary,
+						SourcePath:  sourcePath,
+						DownloadURL: artifact.Binary.URL,
+						SHA256:      artifact.Binary.SHA256,
+						Version:     version.Version,
 					}
 					if artifact.Audit != nil {
 						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
@@ -311,17 +356,29 @@ func collectRuntimeArtifactIndex(runtime RuntimeModel) SimpleRootIndex {
 						continue
 					}
 
-					binaryPath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
-					if seen[binaryPath] {
+					destBinary := fmt.Sprintf(
+						"%s/%s/%d.%d/%s/%s",
+						os,
+						runtime.Name,
+						version.Major,
+						version.Minor,
+						version.Version,
+						artifact.Binary.Filename,
+					)
+					if seen[destBinary] {
 						continue
 					}
-					seen[binaryPath] = true
+					seen[destBinary] = true
 
+					sourcePath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
 					entry := SimpleArtifactEntry{
-						Platform: artifact.Platform,
-						Binary:   binaryPath,
-						SHA256:   artifact.Binary.SHA256,
-						Version:  version.Version,
+						Platform:    artifact.Platform,
+						Type:        artifactTypeFromFilename(artifact.Binary.Filename),
+						Binary:      destBinary,
+						SourcePath:  sourcePath,
+						DownloadURL: artifact.Binary.URL,
+						SHA256:      artifact.Binary.SHA256,
+						Version:     version.Version,
 					}
 					if artifact.Audit != nil {
 						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
@@ -456,17 +513,29 @@ func collectAllArtifactIndex(model *SiteModel) SimpleRootIndex {
 							continue
 						}
 
-						binaryPath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
-						if seen[binaryPath] {
+						destBinary := fmt.Sprintf(
+							"%s/%s/%d.%d/%s/%s",
+							os,
+							runtime.Name,
+							version.Major,
+							version.Minor,
+							version.Version,
+							artifact.Binary.Filename,
+						)
+						if seen[destBinary] {
 							continue
 						}
-						seen[binaryPath] = true
+						seen[destBinary] = true
 
+						sourcePath := fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Binary.Filename)
 						entry := SimpleArtifactEntry{
-							Platform: artifact.Platform,
-							Binary:   binaryPath,
-							SHA256:   artifact.Binary.SHA256,
-							Version:  version.Version,
+							Platform:    artifact.Platform,
+							Type:        artifactTypeFromFilename(artifact.Binary.Filename),
+							Binary:      destBinary,
+							SourcePath:  sourcePath,
+							DownloadURL: artifact.Binary.URL,
+							SHA256:      artifact.Binary.SHA256,
+							Version:     version.Version,
 						}
 						if artifact.Audit != nil {
 							entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
