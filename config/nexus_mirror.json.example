@@ -1,0 +1,20 @@
+{
+  "source_url": "http://localhost:8081",
+  "source_repo": "cdprun",
+  "source_user": "YOUR_SOURCE_USERNAME",
+  "source_password": "YOUR_SOURCE_PASSWORD",
+  "dest_url": "http://localhost:8081",
+  "dest_repo": "ospo",
+  "dest_user": "YOUR_DEST_USERNAME",
+  "dest_password": "YOUR_DEST_PASSWORD",
+  "index_url": "https://clean-dependency-project.github.io/cdprun/simple/python/index.json",
+  "index_file": "",
+  "limit": 3,
+  "dry_run": false,
+  "force": false,
+  "include_items": true,
+  "timeout": "10m",
+  "log_level": "info",
+  "concurrency": 5
+}
+

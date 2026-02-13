@@ -63,3 +63,8 @@ private-key.*
 
 # Site generator output
 _site/
+
+# Nexus mirror config (may contain credentials)
+config/nexus_mirror.json
+config/nexus_mirror.dryrun.json
+nexus-mirror.json

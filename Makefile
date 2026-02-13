@@ -108,6 +108,13 @@ nexus-download-dry-run:
 	@echo "Checking what would be downloaded (dry run)..."
 	@python3 scripts/nexus_proxy_download.py --dry-run
 
+# Nexus mirror (Python, stdlib-only)
+nexus-mirror-py:
+	@NEXUS_MIRROR_CONFIG=config/nexus_mirror.json python3 scripts/nexus_mirror.py
+
+nexus-mirror-py-dry-run:
+	@NEXUS_MIRROR_CONFIG=config/nexus_mirror.dryrun.json python3 scripts/nexus_mirror.py
+
 # =============================================================================
 # Python Package Build (Local Development)
 # Build Python packages locally using Docker
