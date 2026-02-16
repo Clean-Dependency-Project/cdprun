@@ -54,6 +54,7 @@ error.log
 *.tmp
 *.temp
 output.json
+scripts/__pycache__/
 
 # Signing keys for local attestation (DO NOT COMMIT)
 .signing/
