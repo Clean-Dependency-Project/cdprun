@@ -1,0 +1,38 @@
+{
+  "indexes": [
+    {
+      "key": "nodejs",
+      "index_url": "https://clean-dependency-project.github.io/cdprun/simple/nodejs/index.json",
+      "policy_file": "policies/nodejs-policy.json"
+    },
+    {
+      "key": "tomcat",
+      "index_url": "https://clean-dependency-project.github.io/cdprun/simple/tomcat/index.json",
+      "policy_file": "policies/tomcat-policy.json"
+    },
+    {
+      "key": "python",
+      "index_url": "https://clean-dependency-project.github.io/cdprun/simple/python/index.json",
+      "policy_file": "policies/python-policy.json"
+    }
+  ],
+  "source_url": "http://localhost:8081",
+  "source_repo": "cdprun",
+  "source_user_env": "NEXUS_SOURCE_USER",
+  "source_password_env": "NEXUS_SOURCE_PASSWORD",
+  "dest_url": "http://localhost:8081",
+  "dest_repo": "ospo",
+  "dest_user_env": "NEXUS_DEST_USER",
+  "dest_password_env": "NEXUS_DEST_PASSWORD",
+  "limit": 25,
+  "dry_run": false,
+  "force": false,
+  "platform_case_map": {
+    "linux": "Linux",
+    "windows": "Window",
+    "mac": "Mac"
+  },
+  "timeout": "10m",
+  "log_level": "debug"
+}
+
