@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/platform"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
+	"github.com/google/go-github/v57/github"
 )
 
 func TestNewReleaseManager(t *testing.T) {
@@ -523,6 +525,75 @@ func TestBuildArtifactsJSON(t *testing.T) {
 
 	if artifacts.Metadata.PlatformCount == 0 {
 		t.Error("metadata.PlatformCount is 0")
+	}
+}
+
+func TestUploadArtifacts_DuplicateBasenameGetsPlatformQualifiedName(t *testing.T) {
+	tempDir := t.TempDir()
+	linuxDir := filepath.Join(tempDir, "linux-x64")
+	macDir := filepath.Join(tempDir, "mac-x64")
+	if err := os.MkdirAll(linuxDir, 0755); err != nil {
+		t.Fatalf("mkdir linux dir: %v", err)
+	}
+	if err := os.MkdirAll(macDir, 0755); err != nil {
+		t.Fatalf("mkdir mac dir: %v", err)
+	}
+
+	filename := "yarn-v1.22.22.tar.gz"
+	linuxFile := filepath.Join(linuxDir, filename)
+	macFile := filepath.Join(macDir, filename)
+	if err := os.WriteFile(linuxFile, []byte("linux"), 0644); err != nil {
+		t.Fatalf("write linux file: %v", err)
+	}
+	if err := os.WriteFile(macFile, []byte("mac"), 0644); err != nil {
+		t.Fatalf("write mac file: %v", err)
+	}
+
+	var uploadedNames []string
+	rm := &ReleaseManager{
+		db: &mockDatabaseStore{},
+		github: &mockGitHubReleaser{
+			uploadAssetFn: func(releaseID int64, filePath string) (*github.ReleaseAsset, error) {
+				name := filepath.Base(filePath)
+				uploadedNames = append(uploadedNames, name)
+				assetID := int64(len(uploadedNames))
+				downloadURL := "https://example.com/" + name
+				return &github.ReleaseAsset{
+					ID:                 &assetID,
+					Name:               &name,
+					BrowserDownloadURL: &downloadURL,
+				}, nil
+			},
+		},
+		stdout: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		stderr: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	}
+
+	uploaded, err := rm.uploadArtifacts(123, []string{linuxFile, macFile})
+	if err != nil {
+		t.Fatalf("uploadArtifacts() error: %v", err)
+	}
+
+	if len(uploaded) != 2 {
+		t.Fatalf("uploadArtifacts() len = %d, want 2", len(uploaded))
+	}
+
+	if len(uploadedNames) != 2 {
+		t.Fatalf("uploaded names len = %d, want 2", len(uploadedNames))
+	}
+	if uploadedNames[0] != filename {
+		t.Fatalf("first uploaded name = %q, want %q", uploadedNames[0], filename)
+	}
+	if uploadedNames[1] != "mac-x64__"+filename {
+		t.Fatalf("second uploaded name = %q, want %q", uploadedNames[1], "mac-x64__"+filename)
+	}
+
+	info, ok := uploaded["mac-x64__"+filename]
+	if !ok {
+		t.Fatalf("expected uploaded map to contain qualified filename")
+	}
+	if info.OriginalFilename != filename {
+		t.Fatalf("OriginalFilename = %q, want %q", info.OriginalFilename, filename)
 	}
 }
 
