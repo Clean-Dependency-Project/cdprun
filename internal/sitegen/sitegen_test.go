@@ -978,6 +978,86 @@ func TestRenderSimpleIndex(t *testing.T) {
 	}
 }
 
+func TestRenderSimpleIndex_YarnRuntime(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tempDir := t.TempDir()
+
+	model := &SiteModel{
+		Runtimes: []RuntimeModel{
+			{
+				Name: "yarn",
+				Platforms: []PlatformModel{
+					{
+						OS: "linux",
+						Versions: []VersionModel{
+							{
+								Major:   1,
+								Minor:   22,
+								Patch:   22,
+								Version: "1.22.22",
+								Releases: []ReleaseModel{
+									{
+										ReleaseTag: "yarn-1.22.22",
+										Artifacts: []ArtifactModel{
+											{
+												Binary: &FileModel{
+													Filename: "yarn-v1.22.22.tar.gz",
+													URL:      "https://example.com/yarn-v1.22.22.tar.gz",
+													SHA256:   "abc123",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := RenderSimpleIndex(model, tempDir, logger); err != nil {
+		t.Fatalf("RenderSimpleIndex() error = %v", err)
+	}
+
+	runtimeJSONPath := filepath.Join(tempDir, "simple", "yarn", "index.json")
+	runtimeContent, err := os.ReadFile(runtimeJSONPath)
+	if err != nil {
+		t.Fatalf("Expected %s to exist: %v", runtimeJSONPath, err)
+	}
+
+	var runtimeIndex map[string]json.RawMessage
+	if err := json.Unmarshal(runtimeContent, &runtimeIndex); err != nil {
+		t.Fatalf("Failed to parse runtime JSON index: %v", err)
+	}
+
+	linuxEntries := make([]SimpleArtifactEntry, 0)
+	if err := json.Unmarshal(runtimeIndex["linux"], &linuxEntries); err != nil {
+		t.Fatalf("Failed to parse linux entries: %v", err)
+	}
+	if len(linuxEntries) != 1 {
+		t.Fatalf("runtime linux entries len = %d, want 1", len(linuxEntries))
+	}
+	if linuxEntries[0].Binary != "linux/yarn/1.22/1.22.22/yarn-v1.22.22.tar.gz" {
+		t.Fatalf("runtime linux binary = %q", linuxEntries[0].Binary)
+	}
+
+	versionJSONPath := filepath.Join(tempDir, "simple", "yarn", "v1", "index.json")
+	versionContent, err := os.ReadFile(versionJSONPath)
+	if err != nil {
+		t.Fatalf("Expected %s to exist: %v", versionJSONPath, err)
+	}
+
+	var versionIndex SimpleVersionIndex
+	if err := json.Unmarshal(versionContent, &versionIndex); err != nil {
+		t.Fatalf("Failed to parse version JSON index: %v", err)
+	}
+	if len(versionIndex["linux"]) != 1 {
+		t.Fatalf("version linux entries len = %d, want 1", len(versionIndex["linux"]))
+	}
+}
+
 func TestCollectMajorVersions(t *testing.T) {
 	runtime := RuntimeModel{
 		Name: "nodejs",

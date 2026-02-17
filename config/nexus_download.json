@@ -13,6 +13,11 @@
       "repository": "cdprun-nodejs",
       "index_path": "nodejs/index.json",
       "policy_file": "policies/nodejs-policy.json"
+    },
+    "yarn": {
+      "repository": "cdprun-yarn",
+      "index_path": "yarn/index.json",
+      "policy_file": "policies/yarn-policy.json"
     }
   }
 }

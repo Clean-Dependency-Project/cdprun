@@ -149,3 +149,50 @@ runtimes:
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Apache Tomcat Runtime Binaries - {version}"
+  yarn:
+    enabled: true
+    name: "Yarn Classic"
+    description: "Yarn package manager classic distribution"
+    endoflife_product: "yarn"
+    policy_file: "policies/yarn-policy.json"
+    version_pattern: "major"
+    supported_architectures:
+      - "x64"
+    supported_platforms:
+      - os: "windows"
+        arch: ["x64"]
+        file_extension: "msi"
+        download_name: "windows"
+      - os: "linux"
+        arch: ["x64"]
+        file_extension: "tar.gz"
+        download_name: "linux"
+      - os: "mac"
+        arch: ["x64"]
+        file_extension: "tar.gz"
+        download_name: "mac"
+    download:
+      base_url: "https://github.com/yarnpkg/yarn/releases/download"
+      url_pattern: "{base_url}/v{version}/{filename}"
+      user_agent: "cdprun/1.0 (Yarn)"
+      requires_auth: false
+    verification:
+      enabled: true
+      methods:
+        checksum:
+          enabled: false
+          algorithm: "sha256"
+          file_pattern: "{url}.sha256"
+          remote_checksum: true
+        gpg:
+          enabled: true
+          signature_pattern: ".asc"
+    endoflife:
+      product_name: "yarn"
+      check_eol: true
+      warn_on_eol: true
+    release:
+      auto_release: true
+      github_repository: "Clean-Dependency-Project/cdprun"
+      draft_release: false
+      release_name_template: "Yarn Classic Runtime Binaries - {version}"

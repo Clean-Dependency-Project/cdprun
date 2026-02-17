@@ -21,6 +21,7 @@ import (
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
 	tomcatAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/tomcat"
+	yarnAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/yarn"
 	"github.com/clean-dependency-project/cdprun/internal/sitegen"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
@@ -82,11 +83,11 @@ func NewApp() *cli.App {
 				Name:  "download",
 				Usage: "Download runtime binaries from runtime-registry.yaml",
 				Flags: []cli.Flag{
-				&cli.StringFlag{
-					Name:    "runtime",
-					Aliases: []string{"r"},
-					Usage:   "runtime name (nodejs, python, tomcat). If not specified, downloads all enabled runtimes from config",
-				},
+					&cli.StringFlag{
+						Name:    "runtime",
+						Aliases: []string{"r"},
+						Usage:   "runtime name (nodejs, python, tomcat, yarn). If not specified, downloads all enabled runtimes from config",
+					},
 					&cli.StringFlag{
 						Name:    "version",
 						Aliases: []string{"v"},
@@ -195,6 +196,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 			adapter := tomcatAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("tomcat", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register tomcat adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
+		case "yarn":
+			adapter := yarnAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("yarn", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register yarn adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,
