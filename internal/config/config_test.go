@@ -577,6 +577,31 @@ func TestConfig_GetEnabledRuntimes(t *testing.T) {
 	}
 }
 
+func TestConfig_GetEnabledRuntimes_IncludesYarnWhenEnabled(t *testing.T) {
+	config := Config{
+		Runtimes: map[string]Runtime{
+			"yarn": {
+				Enabled:          true,
+				Name:             "Yarn",
+				EndOfLifeProduct: "yarn",
+				PolicyFile:       "policies/yarn-policy.json",
+			},
+		},
+	}
+
+	enabled := config.GetEnabledRuntimes()
+	if len(enabled) != 1 {
+		t.Fatalf("Expected 1 enabled runtime, got %d", len(enabled))
+	}
+	yarnRuntime, ok := enabled["yarn"]
+	if !ok {
+		t.Fatalf("Expected yarn runtime to be enabled")
+	}
+	if yarnRuntime.EndOfLifeProduct != "yarn" {
+		t.Fatalf("Expected yarn endoflife_product to be %q, got %q", "yarn", yarnRuntime.EndOfLifeProduct)
+	}
+}
+
 func TestConfig_GetRuntimeConfig(t *testing.T) {
 	config := Config{
 		Runtimes: map[string]Runtime{
@@ -862,8 +887,6 @@ func TestRuntime_GetConfiguredPlatforms_MultiplePlatforms(t *testing.T) {
 	}
 }
 
-
-
 // TestGetConfiguredPlatforms_UsingSupportedArchitectures tests that supported_architectures drives platform generation
 func TestGetConfiguredPlatforms_UsingSupportedArchitectures(t *testing.T) {
 	tests := []struct {
@@ -889,7 +912,7 @@ func TestGetConfiguredPlatforms_UsingSupportedArchitectures(t *testing.T) {
 			runtime: Runtime{
 				SupportedArchitectures: []string{"x64", "aarch64", "arm"},
 				SupportedPlatforms: []PlatformConfig{
-					{OS: "linux", Arch: []string{"x64"}, FileExtension: "tar.gz"},        // Only x64
+					{OS: "linux", Arch: []string{"x64"}, FileExtension: "tar.gz"},           // Only x64
 					{OS: "windows", Arch: []string{"x64", "aarch64"}, FileExtension: "msi"}, // x64 and aarch64
 				},
 			},
