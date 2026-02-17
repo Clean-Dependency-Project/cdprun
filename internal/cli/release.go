@@ -348,9 +348,11 @@ func (rm *ReleaseManager) createScriptsZip(outputDir, zipName string) (string, e
 
 // artifactInfo contains metadata about an uploaded artifact.
 type artifactInfo struct {
-	URL    string
-	SHA256 string
-	Size   int64
+	URL              string
+	SHA256           string
+	Size             int64
+	OriginalFilename string
+	UploadedFilename string
 }
 
 // calculateFileSHA256 computes the SHA256 hash of a file.
@@ -373,41 +375,125 @@ func calculateFileSHA256(filePath string) (string, error) {
 // Returns a map of filename -> artifact info (URL + SHA256).
 func (rm *ReleaseManager) uploadArtifacts(releaseID int64, files []string) (map[string]artifactInfo, error) {
 	uploaded := make(map[string]artifactInfo)
+	seenUploadNames := make(map[string]int)
 
 	for _, filePath := range files {
-		filename := filepath.Base(filePath)
-		rm.stdout.Info("uploading artifact", "file", filename)
+		originalFilename := filepath.Base(filePath)
+		uploadFilename := uniqueUploadFilename(filePath, seenUploadNames)
+		rm.stdout.Info("uploading artifact", "file", originalFilename, "upload_filename", uploadFilename)
 
 		var size int64
 		if fi, err := os.Stat(filePath); err == nil {
 			size = fi.Size()
 		} else {
-			rm.stderr.Warn("failed to stat file before upload", "file", filename, "error", err)
+			rm.stderr.Warn("failed to stat file before upload", "file", originalFilename, "error", err)
 		}
 
 		// Calculate SHA256 before upload
 		sha256Hash, err := calculateFileSHA256(filePath)
 		if err != nil {
-			rm.stderr.Warn("failed to calculate SHA256", "file", filename, "error", err)
+			rm.stderr.Warn("failed to calculate SHA256", "file", originalFilename, "error", err)
 			// Continue with upload even if hash fails
 		}
 
-		asset, err := rm.github.UploadAsset(releaseID, filePath)
+		uploadPath, cleanup, err := prepareUploadPath(filePath, uploadFilename)
 		if err != nil {
-			return nil, fmt.Errorf("failed to upload %s: %w", filename, err)
+			return nil, fmt.Errorf("failed to prepare upload path for %s: %w", originalFilename, err)
+		}
+		asset, err := rm.github.UploadAsset(releaseID, uploadPath)
+		cleanup()
+		if err != nil {
+			return nil, fmt.Errorf("failed to upload %s: %w", originalFilename, err)
 		}
 
 		downloadURL := rm.github.GetAssetDownloadURL(asset)
-		uploaded[filename] = artifactInfo{
-			URL:    downloadURL,
-			SHA256: sha256Hash,
-			Size:   size,
+		uploaded[uploadFilename] = artifactInfo{
+			URL:              downloadURL,
+			SHA256:           sha256Hash,
+			Size:             size,
+			OriginalFilename: originalFilename,
+			UploadedFilename: uploadFilename,
 		}
 
-		rm.stdout.Info("artifact uploaded", "file", filename, "url", downloadURL, "sha256", sha256Hash)
+		rm.stdout.Info("artifact uploaded", "file", originalFilename, "upload_filename", uploadFilename, "url", downloadURL, "sha256", sha256Hash)
 	}
 
 	return uploaded, nil
+}
+
+func prepareUploadPath(filePath, uploadFilename string) (string, func(), error) {
+	if filepath.Base(filePath) == uploadFilename {
+		return filePath, func() {}, nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "cdprun-upload-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create temp dir: %w", err)
+	}
+
+	src, err := os.Open(filePath)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", func() {}, fmt.Errorf("open source file: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	uploadPath := filepath.Join(tmpDir, uploadFilename)
+	dst, err := os.Create(uploadPath)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", func() {}, fmt.Errorf("create upload file: %w", err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = os.RemoveAll(tmpDir)
+		return "", func() {}, fmt.Errorf("copy file content: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", func() {}, fmt.Errorf("close upload file: %w", err)
+	}
+
+	cleanup := func() {
+		_ = os.RemoveAll(tmpDir)
+	}
+	return uploadPath, cleanup, nil
+}
+
+func uniqueUploadFilename(filePath string, seen map[string]int) string {
+	base := filepath.Base(filePath)
+	if seen[base] == 0 {
+		seen[base] = 1
+		return base
+	}
+
+	qualifier := platformQualifierFromPath(filePath)
+	candidate := base
+	if qualifier != "" {
+		candidate = qualifier + "__" + base
+	}
+	if seen[candidate] == 0 {
+		seen[candidate] = 1
+		return candidate
+	}
+
+	for i := 2; ; i++ {
+		named := fmt.Sprintf("%s__%d", candidate, i)
+		if seen[named] == 0 {
+			seen[named] = 1
+			return named
+		}
+	}
+}
+
+func platformQualifierFromPath(filePath string) string {
+	parent := filepath.Base(filepath.Dir(filePath))
+	normalized := strings.ToLower(parent)
+	if strings.HasPrefix(normalized, "windows-") || strings.HasPrefix(normalized, "linux-") ||
+		strings.HasPrefix(normalized, "mac-") || strings.HasPrefix(normalized, "darwin-") {
+		return parent
+	}
+	return ""
 }
 
 // buildArtifactsJSON creates the JSON structure for storage in the database.
@@ -419,10 +505,19 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 	platforms := make(map[string]*storage.PlatformArtifact)
 	commonFiles := []storage.CommonFile{}
 
-	for filename, info := range uploadedArtifacts {
-		fileInfo, err := getFileInfo(filename, info.URL, downloadResults)
+	for key, info := range uploadedArtifacts {
+		uploadedFilename := info.UploadedFilename
+		if uploadedFilename == "" {
+			uploadedFilename = key
+		}
+		originalFilename := info.OriginalFilename
+		if originalFilename == "" {
+			originalFilename = uploadedFilename
+		}
+
+		fileInfo, err := getFileInfo(originalFilename, info.URL, downloadResults)
 		if err != nil {
-			rm.stderr.Warn("failed to get file info", "file", filename, "error", err)
+			rm.stderr.Warn("failed to get file info", "file", originalFilename, "error", err)
 			continue
 		}
 
@@ -433,7 +528,7 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 			}
 			commonFiles = append(commonFiles, storage.CommonFile{
 				Type:       fileInfo.Type,
-				Filename:   filename,
+				Filename:   uploadedFilename,
 				Size:       size,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
@@ -458,24 +553,24 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 
 		// Categorize the file
 		switch {
-		case strings.HasSuffix(filename, ".audit.json"):
+		case strings.HasSuffix(originalFilename, ".audit.json"):
 			plat.Audit = &storage.AuditArtifact{
-				Filename:   filename,
+				Filename:   uploadedFilename,
 				Size:       fileInfo.Size,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
 			}
-		case strings.HasSuffix(filename, ".sig"), strings.HasSuffix(filename, ".asc"):
+		case strings.HasSuffix(originalFilename, ".sig"), strings.HasSuffix(originalFilename, ".asc"):
 			plat.Signature = &storage.ArtifactFile{
-				Filename:   filename,
+				Filename:   uploadedFilename,
 				Size:       fileInfo.Size,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
 			}
-		case strings.HasSuffix(filename, ".cert"):
+		case strings.HasSuffix(originalFilename, ".cert"):
 			plat.Certificate = &storage.ArtifactFile{
-				Filename:   filename,
+				Filename:   uploadedFilename,
 				Size:       fileInfo.Size,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
@@ -484,7 +579,7 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 		default:
 			// Binary artifact
 			plat.Binary = &storage.ArtifactFile{
-				Filename:   filename,
+				Filename:   uploadedFilename,
 				Size:       fileInfo.Size,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
