@@ -514,7 +514,7 @@ func validateKeyFile(filePath string) error {
 	perm := fileInfo.Mode().Perm()
 	if perm != keyFileMode && perm != 0644 {
 		return fmt.Errorf("key file has incorrect permissions. Expected %o or 0644, got %o", keyFileMode, perm)
-		}
+	}
 
 	return nil
 }

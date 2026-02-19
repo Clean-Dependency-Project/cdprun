@@ -31,9 +31,8 @@ func main() {
 	fmt.Printf("  - http://localhost:%s (from host)\n", *port)
 	fmt.Printf("  - http://host.docker.internal:%s (from Docker)\n", *port)
 	fmt.Println("Press Ctrl+C to stop")
-	
+
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
-

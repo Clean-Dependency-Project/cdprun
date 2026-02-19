@@ -171,28 +171,28 @@ func TestGetVersion(t *testing.T) {
 
 func TestProgressReader_Read(t *testing.T) {
 	tests := []struct {
-		name           string
-		data           []byte
-		readSize       int
+		name          string
+		data          []byte
+		readSize      int
 		expectedCalls int
 	}{
 		{
-			name:           "single read",
-			data:           []byte("test data"),
-			readSize:       10,
-			expectedCalls:  1,
+			name:          "single read",
+			data:          []byte("test data"),
+			readSize:      10,
+			expectedCalls: 1,
 		},
 		{
-			name:           "multiple reads",
-			data:           []byte("test data"),
-			readSize:       4,
-			expectedCalls:  3, // 4 + 4 + 2
+			name:          "multiple reads",
+			data:          []byte("test data"),
+			readSize:      4,
+			expectedCalls: 3, // 4 + 4 + 2
 		},
 		{
-			name:           "empty data",
-			data:           []byte{},
-			readSize:       10,
-			expectedCalls:  0,
+			name:          "empty data",
+			data:          []byte{},
+			readSize:      10,
+			expectedCalls: 0,
 		},
 	}
 
@@ -412,4 +412,3 @@ func TestDownloadNodeJS(t *testing.T) {
 	// which isn't possible without modifying the source code to make httpClient injectable.
 	// The function is tested indirectly through BuildDownloadURL and Download tests.
 }
-

@@ -17,9 +17,10 @@ type TempDir struct {
 
 // NewTempDir creates a new temporary directory structure for release operations.
 // The directory structure is:
-//   {base}/cdprun-{runtime}-{version}-{timestamp}/
-//     downloads/    - Downloaded binaries and audit files
-//     signatures/   - Cosign signature and certificate files
+//
+//	{base}/cdprun-{runtime}-{version}-{timestamp}/
+//	  downloads/    - Downloaded binaries and audit files
+//	  signatures/   - Cosign signature and certificate files
 //
 // The caller is responsible for cleaning up by calling Remove().
 func NewTempDir(runtime, version string) (*TempDir, error) {
@@ -32,9 +33,9 @@ func NewTempDir(runtime, version string) (*TempDir, error) {
 
 	timestamp := time.Now().Format("20060102T150405")
 	dirname := fmt.Sprintf("cdprun-%s-%s-%s", runtime, version, timestamp)
-	
+
 	root := filepath.Join(os.TempDir(), dirname)
-	
+
 	// Create root directory
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
@@ -156,4 +157,3 @@ func listFilesInDir(dir string) ([]string, error) {
 
 	return files, nil
 }
-

@@ -26,3 +26,9 @@ There is a static website generated which uses the GitHub Release as a source of
 
 It is still Work in Progress 
 
+## Strategy Documents
+
+- Runtime supply chain architecture: `docs/architecture.md`
+- Hugging Face model governance strategy: `docs/huggingface-model-governance-strategy.md`
+- Hugging Face model PoC runbook: `docs/hf-poc.md`
+

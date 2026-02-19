@@ -38,7 +38,7 @@ func (m *mockDiscoveryProvider) GetEndOfLifeProduct() string {
 
 func TestDownloadVersionDiscovery(t *testing.T) {
 	// This test simulates the logic in downloadSingleRuntime for version discovery
-	
+
 	tests := []struct {
 		name           string
 		setupPolicy    func(tempDir string) string
@@ -71,15 +71,15 @@ func TestDownloadVersionDiscovery(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			policyPath := tt.setupPolicy(tmpDir)
-			
+
 			provider := &mockDiscoveryProvider{
 				versions: []runtime.VersionInfo{{Version: "22"}},
 			}
-			
+
 			// Simulate the discovery logic from cli.go
 			var versions []runtime.VersionInfo
 			var err error
-			
+
 			if _, statErr := os.Stat(policyPath); statErr == nil {
 				_, err = provider.LoadPolicy(policyPath)
 				if err == nil {
@@ -88,23 +88,22 @@ func TestDownloadVersionDiscovery(t *testing.T) {
 			} else {
 				versions, err = provider.GetMaintainedVersions(context.Background())
 			}
-			
+
 			if err != nil {
 				t.Fatalf("Discovery logic failed: %v", err)
 			}
-			
+
 			if len(versions) == 0 {
 				t.Error("Expected versions to be found")
 			}
-			
+
 			if provider.policyLoaded != tt.expectedPolicy {
 				t.Errorf("policyLoaded = %v, want %v", provider.policyLoaded, tt.expectedPolicy)
 			}
-			
+
 			if provider.apiCalled != tt.expectedAPI {
 				t.Errorf("apiCalled = %v, want %v", provider.apiCalled, tt.expectedAPI)
 			}
 		})
 	}
 }
-

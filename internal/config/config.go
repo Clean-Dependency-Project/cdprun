@@ -67,18 +67,18 @@ func (g *GlobalConfig) GetDownloadTimeout() time.Duration {
 
 // Runtime represents configuration for a specific runtime.
 type Runtime struct {
-	Enabled                bool               `yaml:"enabled"`
-	Name                   string             `yaml:"name"`
-	Description            string             `yaml:"description"`
-	EndOfLifeProduct       string             `yaml:"endoflife_product"`
-	PolicyFile             string             `yaml:"policy_file"`
-	VersionPattern         string             `yaml:"version_pattern"`
-	SupportedArchitectures []string           `yaml:"supported_architectures"`
-	SupportedPlatforms     []PlatformConfig   `yaml:"supported_platforms"`
-	Download               DownloadConfig     `yaml:"download"`
-	Verification           Verification       `yaml:"verification"`
-	EndOfLife              EndOfLifeConfig    `yaml:"endoflife"`
-	Release                ReleaseConfig      `yaml:"release"`
+	Enabled                bool             `yaml:"enabled"`
+	Name                   string           `yaml:"name"`
+	Description            string           `yaml:"description"`
+	EndOfLifeProduct       string           `yaml:"endoflife_product"`
+	PolicyFile             string           `yaml:"policy_file"`
+	VersionPattern         string           `yaml:"version_pattern"`
+	SupportedArchitectures []string         `yaml:"supported_architectures"`
+	SupportedPlatforms     []PlatformConfig `yaml:"supported_platforms"`
+	Download               DownloadConfig   `yaml:"download"`
+	Verification           Verification     `yaml:"verification"`
+	EndOfLife              EndOfLifeConfig  `yaml:"endoflife"`
+	Release                ReleaseConfig    `yaml:"release"`
 }
 
 // PlatformConfig represents platform-specific configuration.
@@ -106,9 +106,9 @@ type EndOfLifeConfig struct {
 
 // ReleaseConfig represents GitHub release configuration for a runtime.
 type ReleaseConfig struct {
-	AutoRelease      bool   `yaml:"auto_release"`       // Enable automatic GitHub release creation
-	GitHubRepository string `yaml:"github_repository"`  // Repository in "owner/repo" format
-	DraftRelease     bool   `yaml:"draft_release"`      // Create as draft (default: false)
+	AutoRelease         bool   `yaml:"auto_release"`          // Enable automatic GitHub release creation
+	GitHubRepository    string `yaml:"github_repository"`     // Repository in "owner/repo" format
+	DraftRelease        bool   `yaml:"draft_release"`         // Create as draft (default: false)
 	ReleaseNameTemplate string `yaml:"release_name_template"` // e.g., "Node.js {version}"
 }
 

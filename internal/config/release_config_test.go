@@ -141,4 +141,3 @@ func TestRealConfig_ReleaseFields(t *testing.T) {
 	t.Logf("Draft Release: %v", nodejs.Release.DraftRelease)
 	t.Logf("Release Name Template: %q", nodejs.Release.ReleaseNameTemplate)
 }
-

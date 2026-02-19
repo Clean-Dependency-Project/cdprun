@@ -48,23 +48,23 @@ func TestNewLoggers(t *testing.T) {
 
 func TestNewLoggersWithOutputFormat(t *testing.T) {
 	tests := []struct {
-		name        string
-		level       slog.Level
+		name         string
+		level        slog.Level
 		outputFormat string
 	}{
 		{
-			name:        "json format",
-			level:       slog.LevelInfo,
+			name:         "json format",
+			level:        slog.LevelInfo,
 			outputFormat: "json",
 		},
 		{
-			name:        "text format (backward compatibility)",
-			level:       slog.LevelInfo,
+			name:         "text format (backward compatibility)",
+			level:        slog.LevelInfo,
 			outputFormat: "text",
 		},
 		{
-			name:        "empty format",
-			level:       slog.LevelInfo,
+			name:         "empty format",
+			level:        slog.LevelInfo,
 			outputFormat: "",
 		},
 	}
@@ -239,4 +239,3 @@ func TestLoggersWriteToStderr(t *testing.T) {
 		t.Error("Expected stderr logger to write to stderr")
 	}
 }
-

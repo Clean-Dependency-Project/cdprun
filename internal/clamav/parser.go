@@ -73,4 +73,3 @@ func extractDatabaseDate(version string) string {
 
 	return "unknown"
 }
-

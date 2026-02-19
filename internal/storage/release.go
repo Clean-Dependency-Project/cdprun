@@ -108,4 +108,3 @@ func (d *DB) ExportReleasesJSON(runtime string) ([]byte, error) {
 
 	return data, nil
 }
-

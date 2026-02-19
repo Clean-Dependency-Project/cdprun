@@ -1,0 +1,48 @@
+# Default config for `hf-poc`.
+#
+# `hf-poc` should be runnable without flags:
+#   go run ./cmd/hf-poc assess
+#   go run ./cmd/hf-poc clone
+#   go run ./cmd/hf-poc verify
+
+hf:
+  base_url: "https://huggingface.co"
+  token_env: "HF_TOKEN"
+  log_level: "info"
+
+assess:
+  upstream_repo_id: "sshleifer/tiny-gpt2"
+  rules_file: "config/hf_assess_rules.yaml"
+
+clone:
+  upstream_repo_id: "sshleifer/tiny-gpt2"
+  upstream_sha: "5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be"
+  org: "srinivasannaveen"
+  org_repo: "tiny-gpt2-curated"
+  private: false
+  # If true, `hf-poc clone` will fail fast with a clear error message if
+  # `git-lfs` is not installed. This is recommended when cloning weights.
+  require_git_lfs: true
+  allowed_files:
+    - config.json
+    - merges.txt
+    - vocab.json
+    - tokenizer_config.json
+    - pytorch_model.bin
+
+verify:
+  org_repo_id: "srinivasannaveen/tiny-gpt2-curated"
+  org_only_namespace: "srinivasannaveen"
+  # Leave blank initially; `clone` will write the last `org_sha` into the state file.
+  revision: ""
+  allowed_files:
+    - config.json
+    - merges.txt
+    - vocab.json
+    - tokenizer_config.json
+    - pytorch_model.bin
+  sha256_by_file: {}
+
+state:
+  # This file is updated by `hf-poc clone` with the resulting org commit SHA.
+  file: "config/hf_poc_state.yaml"

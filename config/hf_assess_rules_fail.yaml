@@ -1,0 +1,23 @@
+# Intentionally strict rules to DEMO failures.
+
+criteria:
+  allowed_licenses:
+    - apache-2.0
+  allow_missing_license: false
+  require_model_card: true
+
+  # Require fields that many public models won't have.
+  required_card_fields:
+    - license
+    - intended_use
+
+  # Deny a common tag prefix to force a fail.
+  deny_tags:
+    - "region:*"
+
+  # Force popularity/age failures.
+  min_downloads_30d: 99999999
+  min_age_days: 9999
+
+required_files:
+  - config.json

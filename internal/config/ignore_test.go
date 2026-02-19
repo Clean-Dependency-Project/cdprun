@@ -129,12 +129,12 @@ func TestIsVersionIgnored(t *testing.T) {
 
 func TestIsPlatformIgnored(t *testing.T) {
 	tests := []struct {
-		name       string
-		config     IgnoreConfig
-		runtime    string
-		version    string
-		osName     string
-		arch       string
+		name        string
+		config      IgnoreConfig
+		runtime     string
+		version     string
+		osName      string
+		arch        string
 		wantIgnored bool
 	}{
 		{
@@ -145,9 +145,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: false,
 		},
 		{
@@ -158,9 +158,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: true,
 		},
 		{
@@ -171,9 +171,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.15.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.15.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: true,
 		},
 		{
@@ -184,9 +184,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "21.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "21.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: false,
 		},
 		{
@@ -197,9 +197,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: false,
 		},
 		{
@@ -212,9 +212,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.15.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.15.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: true,
 		},
 		{
@@ -227,9 +227,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: true,
 		},
 		{
@@ -242,9 +242,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "arm64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "arm64",
 			wantIgnored: false,
 		},
 		{
@@ -258,9 +258,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "20.11.0",
-			osName:     "mac",
-			arch:       "aarch64",
+			version:     "20.11.0",
+			osName:      "mac",
+			arch:        "aarch64",
 			wantIgnored: true,
 		},
 		{
@@ -274,9 +274,9 @@ func TestIsPlatformIgnored(t *testing.T) {
 				},
 			},
 			runtime:     "nodejs",
-			version:    "18.17.0",
-			osName:     "mac",
-			arch:       "x64",
+			version:     "18.17.0",
+			osName:      "mac",
+			arch:        "x64",
 			wantIgnored: true,
 		},
 		{
@@ -285,18 +285,18 @@ func TestIsPlatformIgnored(t *testing.T) {
 				"nodejs": []any{"invalid"},
 			},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: false,
 		},
 		{
-			name: "empty config",
-			config: IgnoreConfig{},
+			name:        "empty config",
+			config:      IgnoreConfig{},
 			runtime:     "nodejs",
-			version:    "22.0",
-			osName:     "linux",
-			arch:       "x64",
+			version:     "22.0",
+			osName:      "linux",
+			arch:        "x64",
 			wantIgnored: false,
 		},
 	}
@@ -396,8 +396,3 @@ func TestMatchPatterns(t *testing.T) {
 		})
 	}
 }
-
-
-
-
-

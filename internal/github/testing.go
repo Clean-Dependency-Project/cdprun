@@ -30,7 +30,7 @@ func NewTestClient(httpClient *http.Client, baseURL, repository string) (*Client
 	if err != nil {
 		return nil, err
 	}
-	
+
 	ghClient.BaseURL = parsedURL
 	ghClient.UploadURL = parsedURL
 
@@ -41,4 +41,3 @@ func NewTestClient(httpClient *http.Client, baseURL, repository string) (*Client
 		ctx:    context.Background(),
 	}, nil
 }
-

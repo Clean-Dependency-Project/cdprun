@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 const (
@@ -25,7 +24,7 @@ const (
 	SHA256FileNameSig = "SHASUMS256.txt.sig"
 	SHA256FileNameAsc = "SHASUMS256.txt.asc"
 	// HTTPTimeout is the timeout for all HTTP requests
-	HTTPTimeout = 300// seconds
+	HTTPTimeout = 300 // seconds
 )
 
 var httpClient = &http.Client{Timeout: HTTPTimeout * time.Second}

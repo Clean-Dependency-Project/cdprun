@@ -154,13 +154,13 @@ func (r *Registry) List() []string {
 
 // Manager coordinates operations across multiple runtime providers.
 type Manager struct {
-	registry       *Registry
-	httpClient     *http.Client
-	stdout         *slog.Logger
-	stderr         *slog.Logger
-	db             *storage.DB
-	config         *config.Config
-	clamavScanner  clamav.Scanner
+	registry      *Registry
+	httpClient    *http.Client
+	stdout        *slog.Logger
+	stderr        *slog.Logger
+	db            *storage.DB
+	config        *config.Config
+	clamavScanner clamav.Scanner
 }
 
 // NewManager creates a new runtime manager with the specified registry, database, and loggers.
@@ -187,12 +187,12 @@ func (m *Manager) initClamAVScanner(runtimeName string) error {
 	if m.config == nil {
 		return nil
 	}
-	
+
 	rtConfig, exists := m.config.GetRuntimeConfig(runtimeName)
 	if !exists || !rtConfig.Verification.Enabled || !rtConfig.Verification.Methods.ClamAV.Enabled {
 		return nil
 	}
-	
+
 	// Initialize ClamAV scanner if not already done
 	if m.clamavScanner == nil {
 		runner := clamav.NewRealCommandRunner()
@@ -203,14 +203,14 @@ func (m *Manager) initClamAVScanner(runtimeName string) error {
 		m.clamavScanner = clamav.NewDockerScanner(runner, image, m.stdout)
 		m.stdout.Info("initialized ClamAV scanner", "image", image)
 	}
-	
+
 	return nil
 }
 
 // updateAuditWithClamAV updates the existing audit JSON file with ClamAV scan results.
 func (m *Manager) updateAuditWithClamAV(filePath string, scanResult clamav.Result, success bool) {
 	auditPath := filePath + ".audit.json"
-	
+
 	// Read existing audit file
 	data, err := os.ReadFile(auditPath)
 	if err != nil {
@@ -220,7 +220,7 @@ func (m *Manager) updateAuditWithClamAV(filePath string, scanResult clamav.Resul
 			"error", err)
 		return
 	}
-	
+
 	// Parse JSON
 	var auditData map[string]interface{}
 	if err := json.Unmarshal(data, &auditData); err != nil {
@@ -229,7 +229,7 @@ func (m *Manager) updateAuditWithClamAV(filePath string, scanResult clamav.Resul
 			"error", err)
 		return
 	}
-	
+
 	// Add ClamAV scan results
 	auditData["clamav_scanned"] = true
 	auditData["clamav_clean"] = scanResult.Clean
@@ -237,17 +237,17 @@ func (m *Manager) updateAuditWithClamAV(filePath string, scanResult clamav.Resul
 	auditData["clamav_engine_version"] = scanResult.Metadata.EngineVersion
 	auditData["clamav_database_date"] = scanResult.Metadata.DatabaseDate
 	auditData["clamav_scan_duration_ms"] = scanResult.Metadata.ScanDuration.Milliseconds()
-	
+
 	// Update verification type to include ClamAV
 	if verType, ok := auditData["verification_type"].(string); ok {
 		auditData["verification_type"] = verType + "+clamav"
 	}
-	
+
 	// Update overall status if malware detected
 	if !scanResult.Clean {
 		auditData["verification_status"] = "failed_malware_detected"
 	}
-	
+
 	// Marshal back to JSON
 	updatedData, err := json.MarshalIndent(auditData, "", "  ")
 	if err != nil {
@@ -256,7 +256,7 @@ func (m *Manager) updateAuditWithClamAV(filePath string, scanResult clamav.Resul
 			"error", err)
 		return
 	}
-	
+
 	// Write updated audit file
 	if err := os.WriteFile(auditPath, updatedData, 0644); err != nil {
 		m.stderr.Warn("failed to write updated audit file",
@@ -264,7 +264,7 @@ func (m *Manager) updateAuditWithClamAV(filePath string, scanResult clamav.Resul
 			"error", err)
 		return
 	}
-	
+
 	m.stdout.Debug("updated audit file with ClamAV results",
 		"file", filePath,
 		"audit_file", auditPath,
@@ -491,50 +491,50 @@ func (m *Manager) DownloadRuntime(ctx context.Context, runtimeName string, versi
 	if err := m.initClamAVScanner(runtimeName); err != nil {
 		m.stderr.Warn("failed to initialize ClamAV scanner", "error", err)
 	}
-	
+
 	if m.clamavScanner != nil {
 		m.stdout.Info("starting ClamAV malware scan", "runtime", runtimeName)
 		clamavFailures := 0
-		
+
 		for i, result := range results {
 			// Only scan main files that passed previous verification
 			if result.Error != nil || !result.Success {
 				continue
 			}
-			
+
 			if result.Task != nil && result.Task.FileType == "main" {
 				m.stdout.Debug("scanning file for malware",
 					"runtime", runtimeName,
 					"file", result.LocalPath)
-				
+
 				scanResult, err := m.clamavScanner.Scan(ctx, result.LocalPath)
 				if err != nil {
 					results[i].Success = false
 					results[i].Error = fmt.Errorf("malware scan failed: %w", err)
 					clamavFailures++
-					
+
 					m.stderr.Error("ClamAV scan failed",
 						"runtime", runtimeName,
 						"file", result.LocalPath,
 						"error", err)
 					continue
 				}
-				
+
 				if !scanResult.Clean {
 					// Malware detected - delete file and fail
 					results[i].Success = false
 					results[i].Error = fmt.Errorf("malware detected: %v", scanResult.Threats)
 					clamavFailures++
-					
+
 					m.stderr.Error("malware detected",
 						"runtime", runtimeName,
 						"file", result.LocalPath,
 						"threats", scanResult.Threats,
 						"engine_version", scanResult.Metadata.EngineVersion)
-					
+
 					// Update audit file with malware detection
 					m.updateAuditWithClamAV(result.LocalPath, scanResult, false)
-					
+
 					// Delete infected file
 					if err := os.Remove(result.LocalPath); err != nil {
 						m.stderr.Error("failed to delete infected file",
@@ -549,13 +549,13 @@ func (m *Manager) DownloadRuntime(ctx context.Context, runtimeName string, versi
 						"file", result.LocalPath,
 						"engine_version", scanResult.Metadata.EngineVersion,
 						"scan_duration", scanResult.Metadata.ScanDuration)
-					
+
 					// Update audit file with clean scan result
 					m.updateAuditWithClamAV(result.LocalPath, scanResult, true)
 				}
 			}
 		}
-		
+
 		if clamavFailures > 0 {
 			m.stderr.Warn("ClamAV scan completed with failures",
 				"runtime", runtimeName,

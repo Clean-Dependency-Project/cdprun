@@ -42,4 +42,3 @@ func (m *MockCommandRunner) Run(_ context.Context, name string, args ...string) 
 	m.Calls = append(m.Calls, call)
 	return m.Output, m.Err
 }
-

@@ -16,10 +16,10 @@ func TestDefaultClientFactory_CreateClient(t *testing.T) {
 	factory := NewClientFactory().(*DefaultClientFactory)
 
 	tests := []struct {
-		name        string
-		config      ClientConfig
-		wantErr     bool
-		wantErrMsg  string
+		name         string
+		config       ClientConfig
+		wantErr      bool
+		wantErrMsg   string
 		verifyClient func(t *testing.T, client Client)
 	}{
 		{
@@ -217,4 +217,3 @@ func TestClientConfig_ZeroValue(t *testing.T) {
 		t.Error("CreateClient() with zero value config returned nil")
 	}
 }
-

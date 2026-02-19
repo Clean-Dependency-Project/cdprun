@@ -101,7 +101,6 @@ func TestExtractDatabaseDate_FromVersion(t *testing.T) {
 	}
 }
 
-
 func TestParseResult(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -198,4 +197,3 @@ End Date:   2025:11:01 19:00:01
 		})
 	}
 }
-

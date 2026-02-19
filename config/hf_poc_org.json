@@ -1,0 +1,19 @@
+{
+  "org_repo_id": "srinivasannaveen/tiny-gpt2-curated",
+  "org_only_namespace": "srinivasannaveen",
+  "allowed_files": [
+    "config.json",
+    "merges.txt",
+    "vocab.json",
+    "tokenizer_config.json",
+    "pytorch_model.bin"
+  ],
+  "sha256_by_file": {
+    "config.json": "",
+    "merges.txt": "",
+    "vocab.json": "",
+    "tokenizer_config.json": "",
+    "pytorch_model.bin": ""
+  }
+}
+

@@ -54,8 +54,8 @@ type Download struct {
 	Attested          bool      `gorm:"not null;default:false"`
 	AttestationFile   string    `gorm:"type:text"`
 	AttestedAt        time.Time `gorm:"type:datetime"`
-	AttestationIssuer string    `gorm:"type:varchar(50)"` // "github-actions" or "local"
-	RekorLogIndex     int64     `gorm:"default:0"`        // Rekor transparency log index
+	AttestationIssuer string    `gorm:"type:varchar(50)"`  // "github-actions" or "local"
+	RekorLogIndex     int64     `gorm:"default:0"`         // Rekor transparency log index
 	RekorLogID        string    `gorm:"type:varchar(128)"` // Rekor log entry ID
 
 	// Status

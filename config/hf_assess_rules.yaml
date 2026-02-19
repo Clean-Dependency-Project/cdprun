@@ -1,0 +1,26 @@
+# Rules for `hf-poc assess`.
+#
+# Keep this small and opinionated for the PoC: the goal is to demonstrate
+# pass/fail outcomes with clear reasons.
+
+criteria:
+  allowed_licenses:
+    - mit
+    - apache-2.0
+  allow_missing_license: true
+  require_model_card: false
+
+  # Model card / metadata checks
+  required_card_fields:
+    - license
+  deny_tags:
+    - "unsafe:*"
+
+  # Popularity/age checks (from HF Hub metadata)
+  # downloads is "last 30 days downloads" from /api/models/{repo}
+  min_downloads_30d: 0
+  min_age_days: 0
+
+# Sanity check: ensure these files exist in the repo.
+required_files:
+  - config.json

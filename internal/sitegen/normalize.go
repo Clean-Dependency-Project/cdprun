@@ -27,10 +27,9 @@ func NormalizePackageName(name string) string {
 	}
 
 	normalized := result.String()
-	
+
 	// Remove leading and trailing hyphens/underscores
 	normalized = strings.Trim(normalized, "-_")
-	
+
 	return normalized
 }
-

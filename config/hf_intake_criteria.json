@@ -1,0 +1,6 @@
+{
+  "allowed_licenses": ["apache-2.0", "mit"],
+  "allow_missing_license": true,
+  "require_model_card": false
+}
+

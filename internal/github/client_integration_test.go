@@ -114,10 +114,10 @@ func TestClient_CreateRelease_Integration(t *testing.T) {
 
 				// Send response
 				w.WriteHeader(tt.mockStatusCode)
-			if tt.mockResponse != nil {
-				_ = json.NewEncoder(w).Encode(tt.mockResponse)
-			} else {
-				_ = json.NewEncoder(w).Encode(map[string]string{
+				if tt.mockResponse != nil {
+					_ = json.NewEncoder(w).Encode(tt.mockResponse)
+				} else {
+					_ = json.NewEncoder(w).Encode(map[string]string{
 						"message": "Validation Failed",
 					})
 				}
@@ -203,10 +203,10 @@ func TestClient_GetRelease_Integration(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.mockStatusCode)
-			if tt.mockResponse != nil {
-				_ = json.NewEncoder(w).Encode(tt.mockResponse)
-			} else {
-				_ = json.NewEncoder(w).Encode(map[string]string{
+				if tt.mockResponse != nil {
+					_ = json.NewEncoder(w).Encode(tt.mockResponse)
+				} else {
+					_ = json.NewEncoder(w).Encode(map[string]string{
 						"message": "Not Found",
 					})
 				}
@@ -302,8 +302,8 @@ func TestClient_UploadAsset_Integration(t *testing.T) {
 				uploadReceived = true
 
 				w.WriteHeader(tt.mockStatusCode)
-			if tt.mockResponse != nil {
-				_ = json.NewEncoder(w).Encode(tt.mockResponse)
+				if tt.mockResponse != nil {
+					_ = json.NewEncoder(w).Encode(tt.mockResponse)
 				}
 			}))
 			defer server.Close()
@@ -380,7 +380,7 @@ func createTestClientWithBaseURL(t *testing.T, baseURL, token, repository string
 	if err != nil {
 		t.Fatalf("Failed to parse server URL: %v", err)
 	}
-	
+
 	// Set both BaseURL and UploadURL to point to mock server
 	ghClient.BaseURL = url
 	ghClient.UploadURL = url
@@ -392,4 +392,3 @@ func createTestClientWithBaseURL(t *testing.T, baseURL, token, repository string
 		ctx:    context.Background(),
 	}
 }
-

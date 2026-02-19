@@ -10,4 +10,3 @@ type ReleaseReader interface {
 	// GetAllReleases retrieves all releases from the database, ordered by creation time descending.
 	GetAllReleases() ([]storage.Release, error)
 }
-

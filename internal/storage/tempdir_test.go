@@ -47,7 +47,7 @@ func TestNewTempDir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			td, err := NewTempDir(tt.runtime, tt.version)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("NewTempDir() expected error containing %q, got nil", tt.errContains)
@@ -269,4 +269,3 @@ func TestTempDir_Paths(t *testing.T) {
 		t.Errorf("Signatures() = %q, want path under root %q", signatures, root)
 	}
 }
-

@@ -339,4 +339,3 @@ func TestClient_GetReleaseURL(t *testing.T) {
 
 	// Note: Testing with actual release would require either mocking or integration test
 }
-

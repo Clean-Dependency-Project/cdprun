@@ -1,0 +1,12 @@
+{
+  "upstream_repo_id": "sshleifer/tiny-gpt2",
+  "upstream_sha": "5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be",
+  "allowed_files": [
+    "config.json",
+    "merges.txt",
+    "vocab.json",
+    "tokenizer_config.json",
+    "pytorch_model.bin"
+  ]
+}
+

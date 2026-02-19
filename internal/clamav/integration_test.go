@@ -105,4 +105,3 @@ func TestIntegration_DockerScanner_RealDocker(t *testing.T) {
 			result.Metadata.EngineVersion)
 	})
 }
-

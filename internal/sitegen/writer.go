@@ -58,4 +58,3 @@ func contentMatches(a, b []byte) bool {
 	hashB := sha256.Sum256(b)
 	return hashA == hashB
 }
-

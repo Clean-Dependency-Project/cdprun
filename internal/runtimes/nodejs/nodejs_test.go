@@ -633,11 +633,11 @@ func TestNodeJSAdapter_ConstructDownloadURL(t *testing.T) {
 	adapter := NewAdapter(&mockEndOfLifeClient{}).(*NodeJSAdapter)
 
 	tests := []struct {
-		name            string
-		version         string
-		platform        platform.Platform
-		wantContains    string // Check if URL contains this substring instead of exact match
-		wantEmpty       bool
+		name         string
+		version      string
+		platform     platform.Platform
+		wantContains string // Check if URL contains this substring instead of exact match
+		wantEmpty    bool
 	}{
 		{
 			name:    "Linux x64",
@@ -1120,9 +1120,9 @@ func TestNodeJSVerificationStrategy_WithAuditFileCreation(t *testing.T) {
 
 	// Create a verification strategy
 	strategy := &NodeJSVerificationStrategy{
-		stdout:           nil,
-		stderr:           nil,
-		Logger:           nil,
+		stdout: nil,
+		stderr: nil,
+		Logger: nil,
 	}
 
 	result := createMockDownloadResult(t, tempDir)
@@ -1232,7 +1232,7 @@ func TestNewAdapterWithConfig(t *testing.T) {
 // Test NodeJSVerificationStrategy.RequiresAdditionalFiles
 func TestNodeJSVerificationStrategy_RequiresAdditionalFiles(t *testing.T) {
 	strategy := &NodeJSVerificationStrategy{}
-	
+
 	if !strategy.RequiresAdditionalFiles() {
 		t.Error("RequiresAdditionalFiles() should return true for Node.js")
 	}
@@ -1241,12 +1241,11 @@ func TestNodeJSVerificationStrategy_RequiresAdditionalFiles(t *testing.T) {
 // Test NodeJSVerificationStrategy.GetType
 func TestNodeJSVerificationStrategy_GetType(t *testing.T) {
 	strategy := &NodeJSVerificationStrategy{}
-	
+
 	if strategy.GetType() != "nodejs-checksum-gpg" {
 		t.Errorf("GetType() = %v, want 'nodejs-checksum-gpg'", strategy.GetType())
 	}
 }
-
 
 // Test verifyChecksum (via NodeJSVerificationStrategy.Verify)
 func TestVerifyChecksum(t *testing.T) {

@@ -70,10 +70,10 @@ func (m *mockGitHubReleaser) GetReleaseURL(release *github.RepositoryRelease) st
 
 // mockDatabaseStore implements DatabaseStore for testing.
 type mockDatabaseStore struct {
-	createReleaseFn   func(release *storage.Release) error
-	getReleaseFn      func(runtime, version string) (*storage.Release, error)
-	listByVersionFn   func(runtime, version string) ([]*storage.Download, error)
-	closeFn           func() error
+	createReleaseFn func(release *storage.Release) error
+	getReleaseFn    func(runtime, version string) (*storage.Release, error)
+	listByVersionFn func(runtime, version string) ([]*storage.Download, error)
+	closeFn         func() error
 }
 
 // CreateRelease implements DatabaseStore.

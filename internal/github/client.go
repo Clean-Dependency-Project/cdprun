@@ -185,4 +185,3 @@ func parseRepository(repository string) (owner, repo string, err error) {
 
 	return owner, repo, nil
 }
-

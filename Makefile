@@ -109,6 +109,19 @@ nexus-download-dry-run:
 	@python3 scripts/nexus_proxy_download.py --dry-run
 
 # =============================================================================
+# Hugging Face PoC
+# =============================================================================
+
+hf-poc-assess:
+	@go run ./cmd/hf-poc assess
+
+hf-poc-clone:
+	@go run ./cmd/hf-poc clone
+
+hf-poc-verify:
+	@go run ./cmd/hf-poc verify
+
+# =============================================================================
 # Python Package Build (Local Development)
 # Build Python packages locally using Docker
 # =============================================================================

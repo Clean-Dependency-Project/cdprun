@@ -156,12 +156,12 @@ func renderOSPages(tmpl *template.Template, runtimeName string, platform Platfor
 		Major    int
 		Versions []VersionModel
 	}
-	
+
 	majorMap := make(map[int][]VersionModel)
 	for _, version := range platform.Versions {
 		majorMap[version.Major] = append(majorMap[version.Major], version)
 	}
-	
+
 	// Create sorted list of major versions (descending)
 	var majors []int
 	for major := range majorMap {
@@ -175,7 +175,7 @@ func renderOSPages(tmpl *template.Template, runtimeName string, platform Platfor
 			}
 		}
 	}
-	
+
 	var versionsByMajor []majorVersionGroup
 	for _, major := range majors {
 		versionsByMajor = append(versionsByMajor, majorVersionGroup{

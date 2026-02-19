@@ -390,4 +390,3 @@ func TestDB_ExportReleasesJSON(t *testing.T) {
 		t.Errorf("ExportReleasesJSON() got %d releases, want 1", len(releases))
 	}
 }
-

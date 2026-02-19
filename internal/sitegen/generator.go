@@ -85,4 +85,3 @@ func (g *Generator) Generate(ctx context.Context, opts GenerateOptions) error {
 	g.logger.Info("site generation completed successfully")
 	return nil
 }
-
