@@ -623,6 +623,28 @@ func downloadRuntime(c *cli.Context) error {
 		"successful", overallSuccess,
 		"failed", overallFailed)
 
+	resolveResult, err := ResolvePackagingTargets(cfg, db, PackagingResolveOptions{RunID: runID})
+	if err != nil {
+		stderr.Error("failed to resolve packaging targets", "run_id", runID, "error", err)
+		return fmt.Errorf("resolve packaging targets: %w", err)
+	}
+
+	stdout.Info("resolved packaging targets",
+		"run_id", runID,
+		"target_count", len(resolveResult.Targets),
+		"skipped_count", len(resolveResult.Skipped))
+
+	manifest := NewResolvedPackageManifest(runID, resolveResult)
+	manifestPath := filepath.Join(outputDir, "package-manifest.resolved.json")
+	if err := WritePackageManifest(manifestPath, manifest); err != nil {
+		stderr.Error("failed to write resolved package manifest", "path", manifestPath, "error", err)
+		return fmt.Errorf("write resolved package manifest: %w", err)
+	}
+	stdout.Info("wrote resolved package manifest",
+		"path", manifestPath,
+		"run_id", runID,
+		"target_count", len(manifest.Targets))
+
 	return nil
 }
 
