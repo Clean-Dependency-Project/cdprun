@@ -126,7 +126,7 @@ func InitDB(cfg Config) (*DB, error) {
 	}
 
 	// Auto-migrate schema
-	if err := db.AutoMigrate(&Download{}, &Release{}); err != nil {
+	if err := db.AutoMigrate(&Download{}, &Release{}, &PackageRecord{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
 
