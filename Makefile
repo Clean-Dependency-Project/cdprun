@@ -1,4 +1,4 @@
-.PHONY: build test clean run run-auto
+.PHONY: build test clean run run-local run-auto
 
 # Go parameters
 GOCMD=go
@@ -83,7 +83,29 @@ build-all:
 	GOOS=windows GOARCH=amd64 $(GOBUILD) -o cdprun-demo-windows-amd64.exe -v
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o cdprun-demo-darwin-amd64 -v
 
-run: build
+run:
+	@echo "Running Docker packaging flow (download -> RPM build -> fresh test) with local DB mount..."
+	@docker run --rm --platform=$(DOCKER_PLATFORM) -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -lc '\
+		set -euo pipefail && \
+		yum install -y --allowerasing ca-certificates git tar gzip findutils coreutils rpm-build rpmdevtools golang sqlite bash && yum clean all && \
+		go mod download && \
+		mkdir -p bin downloads packages && \
+		go build -o ./bin/cdprun ./cmd/runtime-cli/main.go && \
+		./bin/cdprun --log-level info download --output json --output-dir ./downloads && \
+		NODEJS_VERSION=$$(sqlite3 ./downloads.db "SELECT version FROM downloads WHERE runtime='\''nodejs'\'' AND platform='\''linux'\'' AND architecture='\''x64'\'' AND verification_status='\''success'\'' ORDER BY downloaded_at DESC LIMIT 1;") && \
+		if [ -z "$$NODEJS_VERSION" ]; then \
+			echo "No verified Node.js linux-x64 download found in downloads.db; skipping RPM build."; \
+			exit 0; \
+		fi && \
+		echo "Packaging Node.js RPM for $$NODEJS_VERSION..." && \
+		./bin/cdprun --log-level info package rpm \
+			--runtime nodejs --version "$$NODEJS_VERSION" \
+			--db ./downloads.db --input-platform linux --input-arch x64 \
+			--out-dir ./packages && \
+		rpm -ivh ./packages/*.rpm && \
+		bash rpm/test-nodejs.sh "/export/apps/citools/OSPO-nodejs/$$NODEJS_VERSION" "$$NODEJS_VERSION"'
+
+run-local: build
 	@echo "Running interactive demo..."
 	@./$(BINARY_PATH)
 
@@ -114,6 +136,9 @@ nexus-download-dry-run:
 # =============================================================================
 
 PYTHON_VERSION ?= 3.13.11
+NODEJS_VERSION ?= 22.22.0
+
+DOCKER_PLATFORM ?= linux/amd64
 
 # Build Python RPM for Amazon Linux 2023
 python-amazonlinux:
@@ -164,6 +189,39 @@ python-alpine-shell:
 	@echo "Starting interactive shell in Alpine Linux container..."
 	@docker run --rm -it -v $(PWD):/workspace -w /workspace alpine:3.19 /bin/sh
 
+# =============================================================================
+# Node.js Packaging Tests (Local Development)
+# Uses cdprun download + cdprun package + fresh install smoke tests.
+# NOTE: On Apple Silicon, set DOCKER_PLATFORM=linux/amd64 (default) for parity with CI.
+# =============================================================================
+
+nodejs-rpm-build:
+	@echo "Building Node.js $(NODEJS_VERSION) RPM (Docker: AL2023, $(DOCKER_PLATFORM))..."
+	@docker run --rm --platform=$(DOCKER_PLATFORM) -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -lc '\
+		set -euo pipefail && \
+		yum install -y --allowerasing ca-certificates git tar gzip findutils coreutils rpm-build rpmdevtools golang && yum clean all && \
+		go mod download && \
+		mkdir -p bin downloads packages && \
+		go build -o ./bin/cdprun ./cmd/runtime-cli/main.go && \
+		./bin/cdprun --log-level info download \
+			--runtime nodejs --version "$(NODEJS_VERSION)" --exact \
+			--platform linux-x64 --output json --output-dir ./downloads && \
+		./bin/cdprun --log-level info package rpm \
+			--runtime nodejs --version "$(NODEJS_VERSION)" \
+			--db ./downloads.db --input-platform linux --input-arch x64 \
+			--out-dir ./packages'
+
+nodejs-rpm-test: nodejs-rpm-build
+	@echo "Fresh-install testing Node.js $(NODEJS_VERSION) RPM (Docker: AL2023, $(DOCKER_PLATFORM))..."
+	@docker run --rm --platform=$(DOCKER_PLATFORM) -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -lc '\
+		set -euo pipefail && \
+		yum install -y ca-certificates bash && yum clean all && \
+		rpm -ivh ./packages/*.rpm && \
+		bash rpm/test-nodejs.sh "/export/apps/citools/OSPO-nodejs/$(NODEJS_VERSION)" "$(NODEJS_VERSION)"'
+
+nodejs-test: nodejs-rpm-test
+	@echo "Node.js RPM tests complete."
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test

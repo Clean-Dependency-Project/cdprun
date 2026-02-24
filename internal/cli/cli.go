@@ -4,11 +4,14 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -16,6 +19,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/config"
 	"github.com/clean-dependency-project/cdprun/internal/endoflife"
 	gh "github.com/clean-dependency-project/cdprun/internal/github"
+	"github.com/clean-dependency-project/cdprun/internal/packaging"
 	"github.com/clean-dependency-project/cdprun/internal/platform"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
@@ -148,8 +152,288 @@ func NewApp() *cli.App {
 				},
 				Action: sitegenCommand,
 			},
+			{
+				Name:  "package",
+				Usage: "Build OS packages (RPM/APK) from verified downloads (phase 2)",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "rpm",
+						Usage: "Build an RPM from a verified download (phase 2)",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "runtime", Required: true, Usage: "runtime name (nodejs, python, ...)"},
+							&cli.StringFlag{Name: "version", Required: true, Usage: "runtime version to package (e.g., 22.15.0)"},
+							&cli.StringFlag{Name: "package-name", Usage: "override RPM package name (default: OSPO-<runtime>)"},
+							&cli.StringFlag{Name: "install-prefix", Usage: "override install prefix (default: /export/apps/citools/OSPO-<runtime>/<version>)"},
+							&cli.StringFlag{Name: "release", Value: "1", Usage: "RPM release value"},
+							&cli.StringFlag{Name: "arch", Value: "x86_64", Usage: "target architecture label (metadata)"},
+							&cli.StringFlag{Name: "out-dir", Value: "./packages", Usage: "output directory for built packages"},
+							&cli.StringFlag{Name: "output", Value: "json", Usage: "output format (json)"},
+							&cli.StringFlag{Name: "db", Usage: "path to downloads.db to resolve input artifact"},
+							&cli.StringFlag{Name: "input-platform", Value: "linux", Usage: "platform to select from downloads.db"},
+							&cli.StringFlag{Name: "input-arch", Value: "x64", Usage: "arch to select from downloads.db"},
+							&cli.StringFlag{Name: "input-path", Usage: "path to input artifact (when --db not used)"},
+							&cli.StringFlag{Name: "input-sha256", Usage: "sha256 of input artifact (when --db not used)"},
+							&cli.StringFlag{Name: "input-mode", Usage: "input mode (payload-dir, archive-tarball)"},
+							&cli.StringFlag{Name: "payload-dir", Usage: "payload root dir (required for input-mode=payload-dir)"},
+						},
+						Action: packageRPM,
+					},
+					{
+						Name:  "apk",
+						Usage: "Build an APK from a verified download (phase 3)",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "runtime", Required: true, Usage: "runtime name (nodejs, python, ...)"},
+							&cli.StringFlag{Name: "version", Required: true, Usage: "runtime version to package (e.g., 22.15.0)"},
+							&cli.StringFlag{Name: "package-name", Usage: "override APK package name (default: OSPO-<runtime>)"},
+							&cli.StringFlag{Name: "install-prefix", Usage: "override install prefix (default: /export/apps/citools/OSPO-<runtime>/<version>)"},
+							&cli.StringFlag{Name: "release", Value: "1", Usage: "APK release value"},
+							&cli.StringFlag{Name: "arch", Value: "x86_64", Usage: "target architecture label (metadata)"},
+							&cli.StringFlag{Name: "out-dir", Value: "./packages", Usage: "output directory for built packages"},
+							&cli.StringFlag{Name: "output", Value: "json", Usage: "output format (json)"},
+							&cli.StringFlag{Name: "db", Usage: "path to downloads.db to resolve input artifact"},
+							&cli.StringFlag{Name: "input-platform", Value: "linux", Usage: "platform to select from downloads.db"},
+							&cli.StringFlag{Name: "input-arch", Value: "x64", Usage: "arch to select from downloads.db"},
+							&cli.StringFlag{Name: "input-path", Usage: "path to input artifact (when --db not used)"},
+							&cli.StringFlag{Name: "input-sha256", Usage: "sha256 of input artifact (when --db not used)"},
+							&cli.StringFlag{Name: "input-mode", Usage: "input mode (payload-dir, archive-tarball)"},
+							&cli.StringFlag{Name: "payload-dir", Usage: "payload root dir (required for input-mode=payload-dir)"},
+						},
+						Action: packageAPK,
+					},
+				},
+			},
 		},
 	}
+}
+
+func newRunID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate run_id: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+func detectDefaultInputMode(inputPath, payloadDir string) packaging.InputMode {
+	if strings.TrimSpace(payloadDir) != "" {
+		return packaging.InputModePayloadDir
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(inputPath))
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"),
+		strings.HasSuffix(lower, ".tgz"),
+		strings.HasSuffix(lower, ".tar.xz"),
+		strings.HasSuffix(lower, ".tar.bz2"),
+		strings.HasSuffix(lower, ".tar"):
+		return packaging.InputModeArchiveTarball
+	default:
+		return packaging.InputModePayloadDir
+	}
+}
+
+func packageRPM(c *cli.Context) error {
+	outputFormat := c.String("output")
+	logLevel := ParseLogLevelOrDefault(c.String("log-level"))
+	stdout, stderr := NewLoggersWithOutputFormat(logLevel, outputFormat)
+
+	if outputFormat != "json" {
+		return fmt.Errorf("only json output is supported")
+	}
+
+	runtimeName := c.String("runtime")
+	version := c.String("version")
+
+	packageName := strings.TrimSpace(c.String("package-name"))
+	if packageName == "" {
+		packageName = "OSPO-" + runtimeName
+	}
+	installPrefix := strings.TrimSpace(c.String("install-prefix"))
+	if installPrefix == "" {
+		installPrefix = fmt.Sprintf("/export/apps/citools/%s/%s", packageName, version)
+	}
+
+	inputMode := packaging.InputMode(strings.TrimSpace(c.String("input-mode")))
+
+	input := packaging.InputInfo{
+		Path:   strings.TrimSpace(c.String("input-path")),
+		SHA256: strings.TrimSpace(c.String("input-sha256")),
+	}
+
+	dbPath := strings.TrimSpace(c.String("db"))
+	if dbPath != "" {
+		db, err := storage.InitDB(storage.Config{DatabasePath: dbPath, LogLevel: "silent"})
+		if err != nil {
+			return fmt.Errorf("open db: %w", err)
+		}
+		defer func() { _ = db.Close() }()
+
+		platform := c.String("input-platform")
+		arch := c.String("input-arch")
+
+		dl, err := db.GetDownload(runtimeName, version, platform, arch)
+		if err != nil {
+			return fmt.Errorf("resolve download input: %w", err)
+		}
+		if dl.VerificationStatus != "success" {
+			return fmt.Errorf("download is not verified (status=%s) for %s@%s %s-%s", dl.VerificationStatus, runtimeName, version, platform, arch)
+		}
+		if strings.TrimSpace(dl.LocalPath) == "" {
+			return fmt.Errorf("download LocalPath is empty for %s@%s %s-%s", runtimeName, version, platform, arch)
+		}
+		if strings.TrimSpace(dl.ContentSHA256) == "" {
+			return fmt.Errorf("download ContentSHA256 is empty for %s@%s %s-%s", runtimeName, version, platform, arch)
+		}
+
+		input = packaging.InputInfo{
+			Path:      dl.LocalPath,
+			SHA256:    dl.ContentSHA256,
+			SourceURL: dl.SourceURL,
+			RunID:     dl.RunID,
+		}
+	}
+	if inputMode == "" {
+		inputMode = detectDefaultInputMode(input.Path, c.String("payload-dir"))
+	}
+
+	req := packaging.BuildRequest{
+		Runtime:       runtimeName,
+		Version:       version,
+		PackageType:   packaging.PackageTypeRPM,
+		PackageName:   packageName,
+		Release:       c.String("release"),
+		Arch:          c.String("arch"),
+		InstallPrefix: installPrefix,
+		InputMode:     inputMode,
+		Input:         input,
+		PayloadDir:    c.String("payload-dir"),
+		OutDir:        c.String("out-dir"),
+	}
+
+	stdout.Info("starting package build",
+		"runtime", req.Runtime,
+		"version", req.Version,
+		"package_type", req.PackageType,
+		"package_name", req.PackageName,
+		"install_prefix", req.InstallPrefix,
+		"input_mode", req.InputMode,
+		"input_path", req.Input.Path,
+		"out_dir", req.OutDir)
+
+	result, err := packaging.Build(c.Context, packaging.RealRunner{}, req)
+	if err != nil {
+		stderr.Error("package build failed", "error", err)
+		return err
+	}
+
+	out, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
+func packageAPK(c *cli.Context) error {
+	outputFormat := c.String("output")
+	logLevel := ParseLogLevelOrDefault(c.String("log-level"))
+	stdout, stderr := NewLoggersWithOutputFormat(logLevel, outputFormat)
+
+	if outputFormat != "json" {
+		return fmt.Errorf("only json output is supported")
+	}
+
+	runtimeName := c.String("runtime")
+	version := c.String("version")
+
+	packageName := strings.TrimSpace(c.String("package-name"))
+	if packageName == "" {
+		packageName = "OSPO-" + runtimeName
+	}
+	installPrefix := strings.TrimSpace(c.String("install-prefix"))
+	if installPrefix == "" {
+		installPrefix = fmt.Sprintf("/export/apps/citools/%s/%s", packageName, version)
+	}
+
+	inputMode := packaging.InputMode(strings.TrimSpace(c.String("input-mode")))
+
+	input := packaging.InputInfo{
+		Path:   strings.TrimSpace(c.String("input-path")),
+		SHA256: strings.TrimSpace(c.String("input-sha256")),
+	}
+
+	dbPath := strings.TrimSpace(c.String("db"))
+	if dbPath != "" {
+		db, err := storage.InitDB(storage.Config{DatabasePath: dbPath, LogLevel: "silent"})
+		if err != nil {
+			return fmt.Errorf("open db: %w", err)
+		}
+		defer func() { _ = db.Close() }()
+
+		platform := c.String("input-platform")
+		arch := c.String("input-arch")
+
+		dl, err := db.GetDownload(runtimeName, version, platform, arch)
+		if err != nil {
+			return fmt.Errorf("resolve download input: %w", err)
+		}
+		if dl.VerificationStatus != "success" {
+			return fmt.Errorf("download is not verified (status=%s) for %s@%s %s-%s", dl.VerificationStatus, runtimeName, version, platform, arch)
+		}
+		if strings.TrimSpace(dl.LocalPath) == "" {
+			return fmt.Errorf("download LocalPath is empty for %s@%s %s-%s", runtimeName, version, platform, arch)
+		}
+		if strings.TrimSpace(dl.ContentSHA256) == "" {
+			return fmt.Errorf("download ContentSHA256 is empty for %s@%s %s-%s", runtimeName, version, platform, arch)
+		}
+
+		input = packaging.InputInfo{
+			Path:      dl.LocalPath,
+			SHA256:    dl.ContentSHA256,
+			SourceURL: dl.SourceURL,
+			RunID:     dl.RunID,
+		}
+	}
+	if inputMode == "" {
+		inputMode = detectDefaultInputMode(input.Path, c.String("payload-dir"))
+	}
+
+	req := packaging.BuildRequest{
+		Runtime:       runtimeName,
+		Version:       version,
+		PackageType:   packaging.PackageTypeAPK,
+		PackageName:   packageName,
+		Release:       c.String("release"),
+		Arch:          c.String("arch"),
+		InstallPrefix: installPrefix,
+		InputMode:     inputMode,
+		Input:         input,
+		PayloadDir:    c.String("payload-dir"),
+		OutDir:        c.String("out-dir"),
+	}
+
+	stdout.Info("starting package build",
+		"runtime", req.Runtime,
+		"version", req.Version,
+		"package_type", req.PackageType,
+		"package_name", req.PackageName,
+		"install_prefix", req.InstallPrefix,
+		"input_mode", req.InputMode,
+		"input_path", req.Input.Path,
+		"out_dir", req.OutDir)
+
+	result, err := packaging.Build(c.Context, packaging.RealRunner{}, req)
+	if err != nil {
+		stderr.Error("package build failed", "error", err)
+		return err
+	}
+
+	out, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
 }
 
 // initDB initializes the database connection based on the provided configuration.
@@ -285,6 +569,14 @@ func downloadRuntime(c *cli.Context) error {
 		stderr.Error("failed to initialize manager", "error", err)
 		return fmt.Errorf("failed to initialize manager: %w", err)
 	}
+
+	runID, err := newRunID()
+	if err != nil {
+		stderr.Error("failed to generate run_id", "error", err)
+		return err
+	}
+	manager.SetRunID(runID)
+	stdout.Info("generated run correlation id", "run_id", runID)
 
 	// Determine which runtimes to download
 	var runtimesToDownload []string
