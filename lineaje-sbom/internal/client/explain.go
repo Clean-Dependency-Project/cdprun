@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 )
 
@@ -16,16 +17,26 @@ const (
 	defaultMaxPolls   = 3
 )
 
+// stillProcessingRE matches API messages indicating the request is still processing (case-insensitive).
+// Matches both "still processing" and "being processed".
+var stillProcessingRE = regexp.MustCompile(`(?i)(still\s+processing|being\s+processed)`)
+
+// OnStillProcessing is called when the first response has a guid and message indicates
+// the request is still processing. Optional; used by main to save session.
+type OnStillProcessingFunc func(guid, query string, components []string, message string)
+
 // Config holds explain API client configuration.
 type Config struct {
-	BaseURL    string
-	Token      string
-	Query      string
-	Components []string
-	PollDelay  time.Duration
-	MaxPolls   int
-	Timeout    time.Duration
-	Logger     *slog.Logger
+	BaseURL            string
+	Token              string
+	Query              string
+	Components         []string
+	PollDelay          time.Duration
+	MaxPolls           int
+	Timeout            time.Duration
+	Logger             *slog.Logger
+	InitialGUID        string             // when set, skip first request and only poll with this guid
+	OnStillProcessing  OnStillProcessingFunc
 }
 
 // DefaultConfig returns config with default URL and poll settings.
@@ -49,10 +60,11 @@ type explainMetadata struct {
 	Components []string `json:"components"`
 }
 
-// explainResponse is used to parse guid and answer from the API JSON.
+// explainResponse is used to parse guid, message, and answer from the API JSON.
 type explainResponse struct {
-	GUID   string      `json:"guid,omitempty"`
-	Answer interface{} `json:"answer,omitempty"`
+	GUID    string      `json:"guid,omitempty"`
+	Message string      `json:"message,omitempty"`
+	Answer  interface{} `json:"answer,omitempty"`
 }
 
 // Call sends the initial request (no guid), then polls up to MaxPolls times with the returned guid.
@@ -85,22 +97,53 @@ func Call(cfg Config) ([]byte, error) {
 
 	httpClient := &http.Client{Timeout: cfg.Timeout}
 
-	// First request: no guid
-	respBytes, err := doRequest(httpClient, cfg.BaseURL, cfg.Token, bodyBytes, cfg.Logger)
-	if err != nil {
-		return nil, fmt.Errorf("initial request: %w", err)
-	}
+	var guid string
+	var respBytes []byte
 
-	var first explainResponse
-	if err := json.Unmarshal(respBytes, &first); err != nil {
-		return nil, fmt.Errorf("parse initial response: %w", err)
-	}
-	if first.Answer != nil {
-		return respBytes, nil
-	}
-	guid := first.GUID
-	if guid == "" {
-		return respBytes, nil
+	if cfg.InitialGUID != "" {
+		// Resume path: skip first request, poll only with saved guid
+		guid = cfg.InitialGUID
+		reqBody.GUID = guid
+		bodyBytes, err = json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal poll request: %w", err)
+		}
+		if cfg.Logger != nil {
+			cfg.Logger.Info("resuming with saved session, will poll",
+				"status", "resuming",
+				"guid", guid,
+				"max_polls", cfg.MaxPolls,
+				"poll_interval_seconds", int(cfg.PollDelay.Seconds()))
+		}
+	} else {
+		// First request: no guid
+		respBytes, err = doRequest(httpClient, cfg.BaseURL, cfg.Token, bodyBytes, cfg.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("initial request: %w", err)
+		}
+
+		var first explainResponse
+		if err := json.Unmarshal(respBytes, &first); err != nil {
+			return nil, fmt.Errorf("parse initial response: %w", err)
+		}
+		if first.Answer != nil {
+			return respBytes, nil
+		}
+		guid = first.GUID
+		if guid == "" {
+			return respBytes, nil
+		}
+		// Notify caller when still processing so they can save session
+		msg := first.Message
+		if guid != "" && stillProcessingRE.MatchString(msg) && cfg.OnStillProcessing != nil {
+			cfg.OnStillProcessing(guid, cfg.Query, cfg.Components, msg)
+		}
+		if cfg.Logger != nil {
+			cfg.Logger.Info("request still processing, will poll",
+				"status", "still_processing",
+				"max_polls", cfg.MaxPolls,
+				"poll_interval_seconds", int(cfg.PollDelay.Seconds()))
+		}
 	}
 
 	// Poll with guid
@@ -121,6 +164,13 @@ func Call(cfg Config) ([]byte, error) {
 		}
 		if polled.Answer != nil {
 			return respBytes, nil
+		}
+		if i < cfg.MaxPolls-1 && cfg.Logger != nil {
+			cfg.Logger.Info("request still processing, polling again",
+				"status", "still_processing",
+				"attempt", i+2,
+				"max_polls", cfg.MaxPolls,
+				"next_poll_seconds", int(cfg.PollDelay.Seconds()))
 		}
 	}
 	return respBytes, nil

@@ -7,12 +7,16 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/clean-dependency-project/lineaje-sbom/internal/auth"
+	"github.com/clean-dependency-project/lineaje-sbom/internal/client"
+	"github.com/clean-dependency-project/lineaje-sbom/internal/output"
 	"github.com/clean-dependency-project/lineaje-sbom/internal/sbom"
+	"github.com/clean-dependency-project/lineaje-sbom/internal/session"
 )
 
 func main() {
@@ -51,7 +55,20 @@ func main() {
 			},
 			&cli.BoolFlag{
 				Name:  "debug",
-				Usage: "enable debug logging (HTTP requests and responses) to stderr",
+				Usage: "log HTTP request and response (method, URL, body) to stderr as JSON for auth and explain API",
+			},
+			&cli.StringFlag{
+				Name:    "save-session",
+				Usage:   "directory to save session files when API says still processing (default: ./sessions); one file per GUID",
+				Value:   "./sessions",
+			},
+			&cli.BoolFlag{
+				Name:  "no-save-session",
+				Usage: "disable saving sessions (overrides default)",
+			},
+			&cli.StringFlag{
+				Name:  "session",
+				Usage: "resume: path to a saved session file (e.g. ./sessions/<guid>.json); do not use with --sbom or --pom",
 			},
 			&cli.BoolFlag{
 				Name:  "login-only",
@@ -96,15 +113,54 @@ func run(c *cli.Context) error {
 		return nil
 	}
 
+	sessionPath := c.String("session")
 	sbomPath := c.String("sbom")
 	pomPath := c.String("pom")
+
+	if sessionPath != "" {
+		// Resume path: require no sbom/pom
+		if sbomPath != "" || pomPath != "" {
+			return cli.Exit("use either --sbom/--pom or --session, not both", 1)
+		}
+		sess, err := session.Load(sessionPath)
+		if err != nil {
+			return fmt.Errorf("load session: %w", err)
+		}
+		authCfg := auth.DefaultConfig()
+		authCfg.Logger = logger
+		token, err := auth.GetToken(authCfg)
+		if err != nil {
+			return fmt.Errorf("login: %w", err)
+		}
+		pollSec := c.Int("poll-delay")
+		if pollSec <= 0 {
+			pollSec = 5
+		}
+		clientCfg := client.DefaultConfig()
+		clientCfg.Token = token
+		clientCfg.Query = sess.Query
+		clientCfg.Components = sess.Components
+		clientCfg.PollDelay = time.Duration(pollSec) * time.Second
+		clientCfg.Logger = logger
+		clientCfg.InitialGUID = sess.GUID
+		responseBytes, err := client.Call(clientCfg)
+		if err != nil {
+			return fmt.Errorf("explain API: %w", err)
+		}
+		outputFormat := c.String("output")
+		if err := output.Write(os.Stdout, responseBytes, outputFormat); err != nil {
+			return fmt.Errorf("output: %w", err)
+		}
+		return nil
+	}
+
+	// Normal path: exactly one of sbom or pom
 	if sbomPath == "" && pomPath == "" {
-		return cli.Exit("exactly one of --sbom or --pom is required", 1)
+		return cli.Exit("exactly one of --sbom, --pom or --session is required", 1)
 	}
 	if sbomPath != "" && pomPath != "" {
 		return cli.Exit("cannot use both --sbom and --pom", 1)
 	}
-	_ = logger
 
 	var purls []string
 	var err error
@@ -117,19 +173,63 @@ func run(c *cli.Context) error {
 		return fmt.Errorf("parse input: %w", err)
 	}
 
-	outputFormat := c.String("output")
-	if outputFormat == "json" {
-		out := struct {
-			PURLCount int      `json:"purl_count"`
-			PURLs     []string `json:"purls"`
-		}{len(purls), purls}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(out); encErr != nil {
-			return fmt.Errorf("encode json: %w", encErr)
-		}
-		return nil
+	authCfg := auth.DefaultConfig()
+	authCfg.Logger = logger
+	token, err := auth.GetToken(authCfg)
+	if err != nil {
+		return fmt.Errorf("login: %w", err)
 	}
-	fmt.Printf("Found %d PURL(s).\n", len(purls))
+
+	pollSec := c.Int("poll-delay")
+	if pollSec <= 0 {
+		pollSec = 5
+	}
+	clientCfg := client.DefaultConfig()
+	clientCfg.Token = token
+	clientCfg.Query = c.String("query")
+	clientCfg.Components = purls
+	clientCfg.PollDelay = time.Duration(pollSec) * time.Second
+	clientCfg.Logger = logger
+
+	saveSessionDir := c.String("save-session")
+	saveSessions := !c.Bool("no-save-session")
+	var savedGUID string
+	if saveSessions {
+		clientCfg.OnStillProcessing = func(guid, query string, components []string, _ string) {
+			s := session.Session{
+				GUID:       guid,
+				Query:      query,
+				Components: components,
+				CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+				// Do not store API response content (e.g. message) in session
+			}
+			if err := session.Save(saveSessionDir, s); err != nil {
+				logger.Warn("save session failed", "err", err, "guid", guid)
+				return
+			}
+			savedGUID = guid
+			logger.Info("session saved", "status", "session_saved", "guid", guid, "path", filepath.Join(saveSessionDir, guid+".json"))
+		}
+	}
+
+	responseBytes, err := client.Call(clientCfg)
+	if err != nil {
+		return fmt.Errorf("explain API: %w", err)
+	}
+
+	// Only remove the session file when we got a final answer; if still "processing", keep it so user can resume
+	if saveSessions && savedGUID != "" {
+		var final struct {
+			Answer interface{} `json:"answer"`
+		}
+		if json.Unmarshal(responseBytes, &final) == nil && final.Answer != nil {
+			_ = session.RemoveFile(saveSessionDir, savedGUID)
+		}
+	}
+
+	outputFormat := c.String("output")
+	if err := output.Write(os.Stdout, responseBytes, outputFormat); err != nil {
+		return fmt.Errorf("output: %w", err)
+	}
 	return nil
 }
