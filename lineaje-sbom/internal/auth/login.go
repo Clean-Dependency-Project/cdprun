@@ -3,8 +3,10 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -26,12 +28,13 @@ type LoginResponse struct {
 
 // Config holds login configuration (URL and credentials source).
 type Config struct {
-	LoginURL  string
-	Username  string
-	Password  string
-	MaxRetries int
+	LoginURL           string
+	Username           string
+	Password           string
+	MaxRetries         int
 	WaitBetweenRetries time.Duration
-	Timeout   time.Duration
+	Timeout            time.Duration
+	Logger             *slog.Logger
 }
 
 // DefaultConfig returns config with defaults and env vars for username/password.
@@ -77,7 +80,7 @@ func GetToken(cfg Config) (string, error) {
 
 	var lastErr error
 	for attempt := 1; attempt <= cfg.MaxRetries; attempt++ {
-		token, err := doLogin(cfg.LoginURL, body, cfg.Timeout)
+		token, err := doLogin(cfg.LoginURL, body, cfg.Timeout, cfg.Logger)
 		if err == nil && token != "" {
 			return token, nil
 		}
@@ -89,12 +92,16 @@ func GetToken(cfg Config) (string, error) {
 	return "", fmt.Errorf("failed after %d attempts: %w", cfg.MaxRetries, lastErr)
 }
 
-func doLogin(loginURL string, body []byte, timeout time.Duration) (string, error) {
+func doLogin(loginURL string, body []byte, timeout time.Duration, logger *slog.Logger) (string, error) {
 	req, err := http.NewRequest(http.MethodPost, loginURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	if logger != nil && logger.Enabled(context.Background(), slog.LevelDebug) {
+		logger.Debug("http_request", "method", req.Method, "url", req.URL.String())
+	}
 
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
@@ -103,12 +110,33 @@ func doLogin(loginURL string, body []byte, timeout time.Duration) (string, error
 	}
 	defer resp.Body.Close()
 
+	var respBody bytes.Buffer
+	if _, readErr := respBody.ReadFrom(resp.Body); readErr != nil {
+		return "", fmt.Errorf("read response: %w", readErr)
+	}
+
+	if logger != nil && logger.Enabled(context.Background(), slog.LevelDebug) {
+		redacted := respBody.Bytes()
+		var m map[string]interface{}
+		if json.Unmarshal(redacted, &m) == nil {
+			for _, key := range []string{"accessToken", "idToken", "refreshToken"} {
+				if _, ok := m[key]; ok {
+					m[key] = "<redacted>"
+				}
+			}
+			if b, e := json.Marshal(m); e == nil {
+				redacted = b
+			}
+		}
+		logger.Debug("http_response", "status", resp.StatusCode, "body", string(redacted))
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("login returned status %d", resp.StatusCode)
 	}
 
 	var out LoginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(respBody.Bytes(), &out); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if out.AccessToken == "" {

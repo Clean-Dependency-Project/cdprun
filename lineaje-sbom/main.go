@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/clean-dependency-project/lineaje-sbom/internal/auth"
 	"github.com/clean-dependency-project/lineaje-sbom/internal/sbom"
 )
 
@@ -47,6 +49,18 @@ func main() {
 				Value:   "table",
 				Usage:   "output format: table or json",
 			},
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "enable debug logging (HTTP requests and responses) to stderr",
+			},
+			&cli.BoolFlag{
+				Name:  "login-only",
+				Usage: "only test login (uses LINEAJE_USERNAME and LINEAJE_PASSWORD); exit after success or failure",
+			},
+			&cli.BoolFlag{
+				Name:  "print-token",
+				Usage: "with --login-only: print the access token to stdout (e.g. for use with curl: TOKEN=$(lineaje-sbom --login-only --print-token))",
+			},
 		},
 		Action: run,
 	}
@@ -57,6 +71,31 @@ func main() {
 }
 
 func run(c *cli.Context) error {
+	level := slog.LevelInfo
+	if c.Bool("debug") {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+	if c.Bool("login-only") {
+		cfg := auth.DefaultConfig()
+		cfg.Logger = logger
+		token, err := auth.GetToken(cfg)
+		if err != nil {
+			return fmt.Errorf("login: %w", err)
+		}
+		if c.Bool("print-token") {
+			fmt.Fprintln(os.Stdout, token)
+			return nil
+		}
+		if c.String("output") == "json" {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "ok", "token_preview": token[:min(20, len(token))] + "..."})
+		} else {
+			fmt.Fprintln(os.Stdout, "Login OK")
+		}
+		return nil
+	}
+
 	sbomPath := c.String("sbom")
 	pomPath := c.String("pom")
 	if sbomPath == "" && pomPath == "" {
@@ -65,6 +104,7 @@ func run(c *cli.Context) error {
 	if sbomPath != "" && pomPath != "" {
 		return cli.Exit("cannot use both --sbom and --pom", 1)
 	}
+	_ = logger
 
 	var purls []string
 	var err error
