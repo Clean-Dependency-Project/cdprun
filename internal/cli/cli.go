@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,6 +22,7 @@ import (
 	gh "github.com/clean-dependency-project/cdprun/internal/github"
 	"github.com/clean-dependency-project/cdprun/internal/packaging"
 	"github.com/clean-dependency-project/cdprun/internal/platform"
+	"github.com/clean-dependency-project/cdprun/internal/promotion"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
@@ -199,6 +201,17 @@ func NewApp() *cli.App {
 							&cli.StringFlag{Name: "payload-dir", Usage: "payload root dir (required for input-mode=payload-dir)"},
 						},
 						Action: packageAPK,
+					},
+					{
+						Name:  "promote",
+						Usage: "Promote tested package artifacts into releases DB (phase 4)",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "db", Required: true, Usage: "path to downloads.db"},
+							&cli.StringFlag{Name: "manifest", Required: true, Usage: "path to package manifest JSON"},
+							&cli.StringFlag{Name: "test-results", Required: true, Usage: "path to package test results JSON"},
+							&cli.StringFlag{Name: "output", Value: "json", Usage: "output format (json)"},
+						},
+						Action: packagePromote,
 					},
 				},
 			},
@@ -433,6 +446,52 @@ func packageAPK(c *cli.Context) error {
 		return fmt.Errorf("marshal result: %w", err)
 	}
 	fmt.Println(string(out))
+	return nil
+}
+
+func packagePromote(c *cli.Context) error {
+	outputFormat := c.String("output")
+	logLevel := ParseLogLevelOrDefault(c.String("log-level"))
+	stdout, stderr := NewLoggersWithOutputFormat(logLevel, outputFormat)
+
+	if outputFormat != "json" {
+		return fmt.Errorf("only json output is supported")
+	}
+
+	dbPath := strings.TrimSpace(c.String("db"))
+	manifestPath := strings.TrimSpace(c.String("manifest"))
+	testResultsPath := strings.TrimSpace(c.String("test-results"))
+
+	db, err := storage.InitDB(storage.Config{DatabasePath: dbPath, LogLevel: "silent"})
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	stdout.Info("starting package promotion",
+		"manifest", manifestPath,
+		"test_results", testResultsPath)
+
+	summary, err := PromoteTestedPackagesFromFiles(db, manifestPath, testResultsPath)
+	out, marshalErr := json.MarshalIndent(summary, "", "  ")
+	if marshalErr != nil {
+		return fmt.Errorf("marshal promotion summary: %w", marshalErr)
+	}
+	fmt.Println(string(out))
+	if err != nil {
+		if errors.Is(err, promotion.ErrBlocked) {
+			stderr.Error("package promotion blocked",
+				"eligible_entries", summary.EligibleEntries,
+				"blocked_entries", summary.BlockedEntries)
+			return err
+		}
+		stderr.Error("package promotion failed", "error", err)
+		return err
+	}
+
+	stdout.Info("package promotion completed",
+		"eligible_entries", summary.EligibleEntries,
+		"promoted_entries", summary.PromotedEntries)
 	return nil
 }
 
