@@ -2,11 +2,15 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
 	"github.com/urfave/cli/v2"
+
+	"github.com/clean-dependency-project/lineaje-sbom/internal/sbom"
 )
 
 func main() {
@@ -61,9 +65,31 @@ func run(c *cli.Context) error {
 	if sbomPath != "" && pomPath != "" {
 		return cli.Exit("cannot use both --sbom and --pom", 1)
 	}
-	// Phase 1: no-op after flag validation; Phase 2+ will parse and call API
-	_ = c.String("query")
-	_ = c.Int("poll-delay")
-	_ = c.String("output")
+
+	var purls []string
+	var err error
+	if sbomPath != "" {
+		purls, err = sbom.PURLsFromCycloneDX(sbomPath)
+	} else {
+		purls, err = sbom.PURLsFromPOM(pomPath)
+	}
+	if err != nil {
+		return fmt.Errorf("parse input: %w", err)
+	}
+
+	outputFormat := c.String("output")
+	if outputFormat == "json" {
+		out := struct {
+			PURLCount int      `json:"purl_count"`
+			PURLs     []string `json:"purls"`
+		}{len(purls), purls}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if encErr := enc.Encode(out); encErr != nil {
+			return fmt.Errorf("encode json: %w", encErr)
+		}
+		return nil
+	}
+	fmt.Printf("Found %d PURL(s).\n", len(purls))
 	return nil
 }

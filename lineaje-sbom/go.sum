@@ -1,3 +1,7 @@
+deps.dev/util/maven v0.0.0-20260225062937-bb3cf65ba738 h1:dghMMCBfZcHwQEa6dUYgvc04wjPL360Q1vi9wam4Mbc=
+deps.dev/util/maven v0.0.0-20260225062937-bb3cf65ba738/go.mod h1:eGrXziwI7scSGrwIj+5EBHtTeSxAZD/yi8Hb3nFXesA=
+deps.dev/util/semver v0.0.0-20240109040450-1e316b822bc4 h1:RDmJe2F67jB7ovkbd28Pdpw3vEYUi2tWV5RlOHlxByk=
+deps.dev/util/semver v0.0.0-20240109040450-1e316b822bc4/go.mod h1:jkcH+k02gWHBiZ7G4OnUOkSZ6WDq54Pt5DrOA8FN8Uo=
 github.com/cpuguy83/go-md2man/v2 v2.0.7 h1:zbFlGlXEAKlwXpmvle3d8Oe3YnkKIK4xSRTd3sHPnBo=
 github.com/cpuguy83/go-md2man/v2 v2.0.7/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/russross/blackfriday/v2 v2.1.0 h1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf35Ld67mk=
