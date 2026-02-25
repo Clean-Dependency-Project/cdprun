@@ -194,11 +194,24 @@ func TestCollectArtifactFiles(t *testing.T) {
 		t.Logf("Files collected: %v", files)
 	}
 
-	// Verify all collected files contain the version (excluding SHASUMS type files)
+	// Verify all collected files are either:
+	// 1) version-specific binaries/audit/signature,
+	// 2) checksum files, or
+	// 3) package evidence JSON files.
+	packageEvidenceFiles := map[string]struct{}{
+		"package-build-results.json":   {},
+		"package-test-results.json":    {},
+		"package-manifest.built.json":  {},
+		"package-manifest.tested.json": {},
+		"package-promote-summary.json": {},
+	}
 	for _, file := range files {
 		filename := filepath.Base(file)
 		if strings.Contains(filename, "22.15.0") {
 			// This is a version-specific file - good
+			continue
+		}
+		if _, ok := packageEvidenceFiles[filename]; ok {
 			continue
 		}
 		// If it doesn't contain version, it should be a SHASUMS type file

@@ -76,14 +76,28 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 
 	// Collect all artifact files BEFORE creating the release
 	// This allows us to skip release creation if there are no artifacts
-	var allArtifactFiles []string
+	allArtifactFiles := make([]string, 0)
+	seenArtifactPath := make(map[string]struct{})
+	appendUniqueArtifact := func(paths ...string) {
+		for _, p := range paths {
+			clean := strings.TrimSpace(p)
+			if clean == "" {
+				continue
+			}
+			if _, ok := seenArtifactPath[clean]; ok {
+				continue
+			}
+			seenArtifactPath[clean] = struct{}{}
+			allArtifactFiles = append(allArtifactFiles, clean)
+		}
+	}
 	for _, version := range versions {
 		artifactFiles, err := rm.collectArtifactFiles(outputDir, runtimeName, version)
 		if err != nil {
 			rm.stderr.Warn("failed to collect artifact files for version", "version", version, "error", err)
 			continue
 		}
-		allArtifactFiles = append(allArtifactFiles, artifactFiles...)
+		appendUniqueArtifact(artifactFiles...)
 	}
 
 	// Skip release creation if there are no artifacts to upload
@@ -121,7 +135,7 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		rm.stderr.Warn("failed to create scripts zip", "error", err)
 	} else if p != "" {
 		scriptsZipPath = p
-		allArtifactFiles = append(allArtifactFiles, scriptsZipPath)
+		appendUniqueArtifact(scriptsZipPath)
 		// cleanup after upload/buildArtifactsJSON completes
 		defer func() {
 			_ = os.Remove(scriptsZipPath)
