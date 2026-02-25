@@ -53,6 +53,14 @@ type GlobalConfig struct {
 	AutoDownloadAllPlatforms bool          `yaml:"auto_download_all_platforms"`
 	Storage                  StorageConfig `yaml:"storage"`
 	IgnoreFile               string        `yaml:"ignore_file"` // Path to JSON file listing versions to ignore per runtime
+	PackagingExecution       PackagingExecutionConfig `yaml:"packaging_execution"`
+}
+
+// PackagingExecutionConfig controls package executor runtime defaults.
+type PackagingExecutionConfig struct {
+	WorkspaceDir   string `yaml:"workspace_dir"`
+	BinaryPath     string `yaml:"binary_path"`
+	DockerPlatform string `yaml:"docker_platform"`
 }
 
 // GetDownloadTimeout parses and returns the download timeout duration
@@ -90,6 +98,25 @@ type PackagingConfig struct {
 	Targets               []string `yaml:"targets"`                  // Supported values: rpm, apk
 	PackageNameTemplate   string   `yaml:"package_name_template"`    // e.g. OSPO-{runtime}
 	InstallPrefixTemplate string   `yaml:"install_prefix_template"`  // e.g. /export/apps/citools/OSPO-{runtime}/{version}
+	Execution             PackagingExecutionTargets `yaml:"execution"`
+}
+
+// PackagingExecutionTargets holds runtime-specific container executor specs.
+type PackagingExecutionTargets struct {
+	Targets map[string]PackagingExecutionTarget `yaml:"targets"`
+}
+
+// PackagingExecutionTarget defines build/test container specs for one package target.
+type PackagingExecutionTarget struct {
+	Build PackagingExecutionContainer `yaml:"build"`
+	Test  PackagingExecutionContainer `yaml:"test"`
+}
+
+// PackagingExecutionContainer defines how to run one executor container stage.
+type PackagingExecutionContainer struct {
+	Image  string `yaml:"image"`
+	Shell  string `yaml:"shell"`
+	Script string `yaml:"script"`
 }
 
 // PlatformConfig represents platform-specific configuration.

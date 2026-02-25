@@ -8,6 +8,10 @@ config:
  ignore_file: "policies/ignore-versions.yaml"
  storage:
    database_path: "./downloads.db"
+ packaging_execution:
+   workspace_dir: "."
+   binary_path: "./bin/cdprun"
+   docker_platform: "linux/amd64"
 runtimes:
   python:
     enabled: false
@@ -62,6 +66,26 @@ runtimes:
       targets: ["rpm", "apk"]
       package_name_template: "OSPO-{runtime}"
       install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+      execution:
+        targets:
+          rpm:
+            build:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/python/rpm/build.sh"
+            test:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/python/rpm/test.sh"
+          apk:
+            build:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/python/apk/build.sh"
+            test:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/python/apk/test.sh"
   nodejs:
    enabled: true
    name: "Node.js"
@@ -115,6 +139,17 @@ runtimes:
      targets: ["rpm"]
      package_name_template: "OSPO-{runtime}"
      install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+     execution:
+       targets:
+         rpm:
+           build:
+             image: "amazonlinux:2023"
+             shell: "/bin/bash"
+             script: "bash /workspace/scripts/package/rpm/build.sh"
+           test:
+             image: "amazonlinux:2023"
+             shell: "/bin/bash"
+             script: "bash /workspace/scripts/package/rpm/test.sh"
   tomcat:
     enabled: false
     name: "Apache Tomcat"
@@ -164,6 +199,26 @@ runtimes:
       targets: []
       package_name_template: "OSPO-{runtime}"
       install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+      execution:
+        targets:
+          rpm:
+            build:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/build.sh"
+            test:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/test.sh"
+          apk:
+            build:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/build.sh"
+            test:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/test.sh"
   yarn:
     enabled: false
     name: "Yarn Classic"
@@ -216,3 +271,23 @@ runtimes:
       targets: []
       package_name_template: "OSPO-{runtime}"
       install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+      execution:
+        targets:
+          rpm:
+            build:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/build.sh"
+            test:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/test.sh"
+          apk:
+            build:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/build.sh"
+            test:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/test.sh"
