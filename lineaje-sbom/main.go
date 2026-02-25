@@ -12,11 +12,11 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/clean-dependency-project/lineaje-sbom/internal/auth"
-	"github.com/clean-dependency-project/lineaje-sbom/internal/client"
-	"github.com/clean-dependency-project/lineaje-sbom/internal/output"
-	"github.com/clean-dependency-project/lineaje-sbom/internal/sbom"
-	"github.com/clean-dependency-project/lineaje-sbom/internal/session"
+	"github.com/clean-dependency-project/cdprun/lineaje-sbom/internal/auth"
+	"github.com/clean-dependency-project/cdprun/lineaje-sbom/internal/client"
+	"github.com/clean-dependency-project/cdprun/lineaje-sbom/internal/output"
+	"github.com/clean-dependency-project/cdprun/lineaje-sbom/internal/sbom"
+	"github.com/clean-dependency-project/cdprun/lineaje-sbom/internal/session"
 )
 
 func main() {
