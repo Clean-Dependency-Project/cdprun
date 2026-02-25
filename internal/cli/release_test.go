@@ -132,8 +132,11 @@ func TestCollectArtifactFiles(t *testing.T) {
 	stdout := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	stderr := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
-	// Create temporary output directory with test files
-	tempDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	tempDir := filepath.Join(workspaceDir, "downloads")
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		t.Fatalf("Failed to create download output dir: %v", err)
+	}
 
 	// Create test files
 	testFiles := []string{
@@ -153,6 +156,21 @@ func TestCollectArtifactFiles(t *testing.T) {
 		if err := os.WriteFile(filePath, []byte("test content"), 0644); err != nil {
 			t.Fatalf("Failed to create test file %s: %v", filename, err)
 		}
+	}
+
+	packagesDir := filepath.Join(workspaceDir, "packages")
+	if err := os.MkdirAll(packagesDir, 0o755); err != nil {
+		t.Fatalf("Failed to create packages dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packagesDir, "OSPO-nodejs-22.15.0-1.x86_64.rpm"), []byte("rpm"), 0o644); err != nil {
+		t.Fatalf("Failed to create package file: %v", err)
+	}
+	artifactsDir := filepath.Join(workspaceDir, "artifacts")
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		t.Fatalf("Failed to create artifacts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactsDir, "package-test-results.json"), []byte(`{"run_id":"r1","results":[]}`), 0o644); err != nil {
+		t.Fatalf("Failed to create package evidence file: %v", err)
 	}
 
 	rm := &ReleaseManager{
@@ -187,6 +205,24 @@ func TestCollectArtifactFiles(t *testing.T) {
 		if !strings.Contains(filename, "SHASUMS") && !strings.Contains(filename, "checksums") {
 			t.Errorf("collected file %s does not contain version and is not a checksum file", filename)
 		}
+	}
+
+	foundPackageRPM := false
+	foundPackageEvidence := false
+	for _, file := range files {
+		base := filepath.Base(file)
+		if base == "OSPO-nodejs-22.15.0-1.x86_64.rpm" {
+			foundPackageRPM = true
+		}
+		if base == "package-test-results.json" {
+			foundPackageEvidence = true
+		}
+	}
+	if !foundPackageRPM {
+		t.Error("collectArtifactFiles() did not include package rpm")
+	}
+	if !foundPackageEvidence {
+		t.Error("collectArtifactFiles() did not include package evidence JSON")
 	}
 }
 
@@ -276,6 +312,22 @@ func TestGetFileInfo(t *testing.T) {
 			wantOS:           "darwin",
 			wantArch:         "arm64",
 			wantType:         "artifact",
+		},
+		{
+			name:             "package rpm file",
+			filename:         "OSPO-nodejs-22.15.0-1.amzn2023.x86_64.rpm",
+			url:              "https://example.com/OSPO-nodejs-22.15.0-1.amzn2023.x86_64.rpm",
+			wantIsCommonFile: false,
+			wantOS:           "linux",
+			wantArch:         "x64",
+			wantType:         "binary",
+		},
+		{
+			name:             "package test results JSON",
+			filename:         "package-test-results.json",
+			url:              "https://example.com/package-test-results.json",
+			wantIsCommonFile: true,
+			wantType:         "package_test_results",
 		},
 	}
 

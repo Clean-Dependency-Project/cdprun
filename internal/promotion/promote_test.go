@@ -220,6 +220,66 @@ func TestPromoteTestedPackages_BlockedOnMissingRelease_NoMutation(t *testing.T) 
 	}
 }
 
+func TestPromoteTestedPackages_ResolvesURLFromReleaseArtifactsByPackagePath(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+	if err := seedRelease(t, db, "nodejs", "22.22.0", "nodejs-v22.22.0-test"); err != nil {
+		t.Fatalf("seedRelease() error: %v", err)
+	}
+	if err := db.AppendOrMergePlatformArtifact("nodejs", "22.22.0", storage.PlatformArtifact{
+		Platform:     "linux-x64-rpm",
+		PlatformOS:   "linux",
+		PlatformArch: "x64",
+		Binary: &storage.ArtifactFile{
+			Filename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
+			SHA256:   "pkg-sha-4",
+			Size:     1024,
+			URL:      "https://example.com/releases/download/nodejs-v22.22.0-test/OSPO-nodejs-22.22.0-1.x86_64.rpm",
+		},
+	}); err != nil {
+		t.Fatalf("AppendOrMergePlatformArtifact() error: %v", err)
+	}
+
+	targets := []Target{
+		{
+			Runtime:       "nodejs",
+			Version:       "22.22.0",
+			Target:        "rpm",
+			InputPlatform: "linux",
+			InputArch:     "x64",
+			InputSHA256:   "in-sha-4",
+			PackageName:   "OSPO-nodejs",
+			InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
+			Tested:        true,
+		},
+	}
+	results := TestResultsFile{
+		RunID: "run-1",
+		Results: []TestResult{
+			{
+				Runtime:       "nodejs",
+				Version:       "22.22.0",
+				Target:        "rpm",
+				InputSHA256:   "in-sha-4",
+				PackageName:   "OSPO-nodejs",
+				InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
+				Passed:        true,
+				PackagePath:   "/workspace/packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
+				PackageSHA256: "pkg-sha-4",
+				PackageSize:   1024,
+			},
+		},
+	}
+
+	summary, err := PromoteTestedPackages(db, "run-1", targets, results)
+	if err != nil {
+		t.Fatalf("PromoteTestedPackages() error: %v", err)
+	}
+	if summary.PromotedEntries != 1 || summary.BlockedEntries != 0 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
 func createTestDB(t *testing.T) (*storage.DB, func()) {
 	t.Helper()
 

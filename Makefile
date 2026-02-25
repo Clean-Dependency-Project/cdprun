@@ -1,4 +1,4 @@
-.PHONY: build test clean run run-local run-auto
+.PHONY: build test clean run run-local run-auto run-download run-package-build run-package-test run-package-promote
 
 # Go parameters
 GOCMD=go
@@ -6,21 +6,27 @@ GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
-BINARY_NAME=cdprun
+BINARY_NAME=cdprun-host
 BINARY_PATH=bin/$(BINARY_NAME)
+# Binary used by Docker packaging scripts (must be Linux).
 ROOT_BINARY_NAME=cdprun
 ROOT_BINARY_PATH=bin/$(ROOT_BINARY_NAME)
 
 all: test build
 
 build: test
-	@echo "Building $(ROOT_BINARY_NAME)..."
-	@$(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
+	@echo "Building host binary ($(BINARY_NAME))..."
+	@mkdir -p bin
+	@$(GOBUILD) -o $(BINARY_PATH) ./cmd/runtime-cli/main.go
+	@echo "Building Linux binary ($(ROOT_BINARY_NAME)) for containers..."
+	@GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
 
 build-only:
-	@echo "Building $(ROOT_BINARY_NAME) (skipping tests)..."
+	@echo "Building host binary ($(BINARY_NAME)) (skipping tests)..."
 	@mkdir -p bin
-	@$(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
+	@$(GOBUILD) -o $(BINARY_PATH) ./cmd/runtime-cli/main.go
+	@echo "Building Linux binary ($(ROOT_BINARY_NAME)) for containers..."
+	@GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
 
 test: deps
 	@echo "Running tests..."
@@ -83,27 +89,51 @@ build-all:
 	GOOS=windows GOARCH=amd64 $(GOBUILD) -o cdprun-demo-windows-amd64.exe -v
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o cdprun-demo-darwin-amd64 -v
 
-run:
-	@echo "Running Docker packaging flow (download -> RPM build -> fresh test) with local DB mount..."
-	@docker run --rm --platform=$(DOCKER_PLATFORM) -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -lc '\
-		set -euo pipefail && \
-		yum install -y --allowerasing ca-certificates git tar gzip findutils coreutils rpm-build rpmdevtools golang sqlite bash && yum clean all && \
-		go mod download && \
-		mkdir -p bin downloads packages && \
-		go build -o ./bin/cdprun ./cmd/runtime-cli/main.go && \
-		./bin/cdprun --log-level info download --output json --output-dir ./downloads && \
-		NODEJS_VERSION=$$(sqlite3 ./downloads.db "SELECT version FROM downloads WHERE runtime='\''nodejs'\'' AND platform='\''linux'\'' AND architecture='\''x64'\'' AND verification_status='\''success'\'' ORDER BY downloaded_at DESC LIMIT 1;") && \
-		if [ -z "$$NODEJS_VERSION" ]; then \
-			echo "No verified Node.js linux-x64 download found in downloads.db; skipping RPM build."; \
-			exit 0; \
-		fi && \
-		echo "Packaging Node.js RPM for $$NODEJS_VERSION..." && \
-		./bin/cdprun --log-level info package rpm \
-			--runtime nodejs --version "$$NODEJS_VERSION" \
-			--db ./downloads.db --input-platform linux --input-arch x64 \
-			--out-dir ./packages && \
-		rpm -ivh ./packages/*.rpm && \
-		bash rpm/test-nodejs.sh "/export/apps/citools/OSPO-nodejs/$$NODEJS_VERSION" "$$NODEJS_VERSION"'
+run-download: build-only
+	@echo "Running download stage..."
+	@mkdir -p $(ARTIFACTS_DIR) $(DOWNLOADS_DIR) $(PACKAGES_DIR) bin
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error download --output json --output-dir $(DOWNLOADS_DIR) > $(ARTIFACTS_DIR)/download-summary.json
+
+run-package-build: build-only
+	@echo "Running package build stage..."
+	@test -f "$(PACKAGE_MANIFEST_RESOLVED)" || (echo "missing resolved manifest: $(PACKAGE_MANIFEST_RESOLVED)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR) $(PACKAGES_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+		--stage build \
+		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
+		--build-results $(PACKAGE_BUILD_RESULTS) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--built-manifest $(PACKAGE_MANIFEST_BUILT) \
+		--tested-manifest $(PACKAGE_MANIFEST_TESTED) \
+		--output json > $(PACKAGE_EXECUTE_BUILD_SUMMARY)
+
+run-package-test: build-only
+	@echo "Running package test stage..."
+	@test -f "$(PACKAGE_MANIFEST_BUILT)" || (echo "missing built manifest: $(PACKAGE_MANIFEST_BUILT)" && exit 1)
+	@test -f "$(PACKAGE_BUILD_RESULTS)" || (echo "missing build results: $(PACKAGE_BUILD_RESULTS)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+		--stage test \
+		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
+		--build-results $(PACKAGE_BUILD_RESULTS) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--built-manifest $(PACKAGE_MANIFEST_BUILT) \
+		--tested-manifest $(PACKAGE_MANIFEST_TESTED) \
+		--output json > $(PACKAGE_EXECUTE_TEST_SUMMARY)
+
+run-package-promote: build-only
+	@echo "Running package promotion stage..."
+	@test -f "$(PACKAGE_MANIFEST_TESTED)" || (echo "missing tested manifest: $(PACKAGE_MANIFEST_TESTED)" && exit 1)
+	@test -f "$(PACKAGE_TEST_RESULTS)" || (echo "missing test results: $(PACKAGE_TEST_RESULTS)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package promote \
+		--db ./downloads.db \
+		--manifest $(PACKAGE_MANIFEST_TESTED) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--output json > $(PACKAGE_PROMOTE_SUMMARY)
+
+run: run-download run-package-build run-package-test run-package-promote
+	@echo "Run completed: download -> build -> test -> promote"
 
 run-local: build
 	@echo "Running interactive demo..."
@@ -139,6 +169,20 @@ PYTHON_VERSION ?= 3.13.11
 NODEJS_VERSION ?= 22.22.0
 
 DOCKER_PLATFORM ?= linux/amd64
+
+ARTIFACTS_DIR ?= ./artifacts
+DOWNLOADS_DIR ?= ./downloads
+PACKAGES_DIR ?= ./packages
+RUNTIME_CONFIG ?= ./runtime-registry.yaml
+
+PACKAGE_MANIFEST_RESOLVED ?= $(DOWNLOADS_DIR)/package-manifest.resolved.json
+PACKAGE_MANIFEST_BUILT ?= $(ARTIFACTS_DIR)/package-manifest.built.json
+PACKAGE_MANIFEST_TESTED ?= $(ARTIFACTS_DIR)/package-manifest.tested.json
+PACKAGE_BUILD_RESULTS ?= $(ARTIFACTS_DIR)/package-build-results.json
+PACKAGE_TEST_RESULTS ?= $(ARTIFACTS_DIR)/package-test-results.json
+PACKAGE_EXECUTE_BUILD_SUMMARY ?= $(ARTIFACTS_DIR)/package-execute-build-summary.json
+PACKAGE_EXECUTE_TEST_SUMMARY ?= $(ARTIFACTS_DIR)/package-execute-test-summary.json
+PACKAGE_PROMOTE_SUMMARY ?= $(ARTIFACTS_DIR)/package-promote-summary.json
 
 # Build Python RPM for Amazon Linux 2023
 python-amazonlinux:
@@ -224,4 +268,4 @@ nodejs-test: nodejs-rpm-test
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto run-download run-package-build run-package-test run-package-promote nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test

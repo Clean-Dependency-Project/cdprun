@@ -1,0 +1,18 @@
+{
+  "run_id": "761bbed2e84b052687fd2db85861273d",
+  "results": [
+    {
+      "runtime": "nodejs",
+      "version": "22.22.0",
+      "target": "rpm",
+      "input_sha256": "9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37",
+      "package_name": "OSPO-nodejs",
+      "install_prefix": "/export/apps/citools/OSPO-nodejs/22.22.0",
+      "passed": true,
+      "package_filename": "OSPO-nodejs-22.22.0-1.amzn2023.x86_64.rpm",
+      "package_path": "packages/OSPO-nodejs-22.22.0-1.amzn2023.x86_64.rpm",
+      "package_sha256": "2ad4eb0ba79baa0ffdd43edaa25589d16fc8a6f9a4f3c7971fc6f9d51b031aac",
+      "package_size": 35319938
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 package promotion
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -223,7 +224,11 @@ func applyEligiblePromotions(db Store, eligible []entryAndResult) (int, error) {
 }
 
 func promoteOne(db Store, item entryAndResult, promotedAt time.Time) error {
-	artifact, err := toPlatformArtifact(item.target, item.result)
+	resultWithURL, err := withResolvedPackageURL(db, item.target, item.result)
+	if err != nil {
+		return fmt.Errorf("resolve package url for %s@%s %s: %w", item.target.Runtime, item.target.Version, item.target.Target, err)
+	}
+	artifact, err := toPlatformArtifact(item.target, resultWithURL)
 	if err != nil {
 		return fmt.Errorf("build platform artifact for %s@%s %s: %w", item.target.Runtime, item.target.Version, item.target.Target, err)
 	}
@@ -252,6 +257,48 @@ func promoteOne(db Store, item entryAndResult, promotedAt time.Time) error {
 	return nil
 }
 
+func withResolvedPackageURL(db Store, target Target, result TestResult) (TestResult, error) {
+	url := strings.TrimSpace(result.PackageURL)
+	if url != "" {
+		return result, nil
+	}
+	filename := strings.TrimSpace(result.PackageFilename)
+	if filename == "" {
+		filename = filepath.Base(strings.TrimSpace(result.PackagePath))
+	}
+	if filename == "" {
+		return TestResult{}, fmt.Errorf("package filename is required when package_url is empty")
+	}
+
+	release, err := db.GetRelease(target.Runtime, target.Version)
+	if err != nil {
+		return TestResult{}, fmt.Errorf("get release: %w", err)
+	}
+	var artifacts storage.ReleaseArtifacts
+	if err := json.Unmarshal([]byte(strings.TrimSpace(release.Artifacts)), &artifacts); err != nil {
+		return TestResult{}, fmt.Errorf("parse release artifacts: %w", err)
+	}
+
+	for _, platformArtifact := range artifacts.Platforms {
+		if platformArtifact.Binary == nil {
+			continue
+		}
+		candidate := strings.TrimSpace(platformArtifact.Binary.Filename)
+		if candidate == "" {
+			continue
+		}
+		if candidate == filename || strings.HasSuffix(candidate, "__"+filename) {
+			resolvedURL := strings.TrimSpace(platformArtifact.Binary.URL)
+			if resolvedURL == "" {
+				return TestResult{}, fmt.Errorf("release artifact %q has empty url", candidate)
+			}
+			result.PackageURL = resolvedURL
+			return result, nil
+		}
+	}
+	return TestResult{}, fmt.Errorf("uploaded release URL not found for package filename %q", filename)
+}
+
 func entryKey(runtime, version, target, inputSHA256, packageName, installPrefix string) string {
 	return strings.ToLower(strings.TrimSpace(runtime)) + "|" +
 		strings.ToLower(strings.TrimSpace(version)) + "|" +
@@ -274,11 +321,8 @@ func toPlatformArtifact(target Target, result TestResult) (storage.PlatformArtif
 	}
 
 	url := strings.TrimSpace(result.PackageURL)
-	if url == "" && strings.TrimSpace(result.PackagePath) != "" {
-		url = "file://" + strings.TrimSpace(result.PackagePath)
-	}
 	if url == "" {
-		url = filename
+		return storage.PlatformArtifact{}, fmt.Errorf("package url is required")
 	}
 
 	platform := fmt.Sprintf("%s-%s-%s", target.InputPlatform, target.InputArch, strings.ToLower(strings.TrimSpace(target.Target)))

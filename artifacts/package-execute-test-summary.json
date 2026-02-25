@@ -1,0 +1,11 @@
+{
+  "stage": "test",
+  "run_id": "761bbed2e84b052687fd2db85861273d",
+  "target_count": 1,
+  "build_failures": 0,
+  "test_failures": 0,
+  "built_manifest": "./artifacts/package-manifest.built.json",
+  "tested_manifest": "./artifacts/package-manifest.tested.json",
+  "build_results": "./artifacts/package-build-results.json",
+  "test_results": "./artifacts/package-test-results.json"
+}

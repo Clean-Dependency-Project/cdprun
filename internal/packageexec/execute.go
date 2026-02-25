@@ -173,10 +173,13 @@ func buildOneInContainer(ctx context.Context, runner packaging.CommandRunner, op
 		"run", "--rm", "--platform=" + opts.DockerPlatform,
 		"-v", opts.WorkspaceDir + ":/workspace",
 		"-w", "/workspace",
+	}
+	args = appendDockerEnvArgs(args, buildEnvForTarget(opts, target))
+	args = append(args,
 		execSpec.Build.Image,
 		execSpec.Build.Shell, "-lc", execSpec.Build.Script,
-	}
-	stdout, stderr, err := runner.Run(ctx, "", "docker", args, buildEnvForTarget(opts, target))
+	)
+	stdout, stderr, err := runner.Run(ctx, "", "docker", args, nil)
 	if err != nil {
 		return packaging.BuildResult{}, fmt.Errorf("docker build container failed: %w (stderr=%s)", err, strings.TrimSpace(stderr))
 	}
@@ -198,13 +201,17 @@ func testOneInContainer(ctx context.Context, runner packaging.CommandRunner, opt
 	if err != nil {
 		return err
 	}
-	_, stderr, runErr := runner.Run(ctx, "", "docker", []string{
+	args := []string{
 		"run", "--rm", "--platform=" + opts.DockerPlatform,
 		"-v", opts.WorkspaceDir + ":/workspace",
 		"-w", "/workspace",
+	}
+	args = appendDockerEnvArgs(args, testEnvForTarget(opts, target, packagePath))
+	args = append(args,
 		execSpec.Test.Image,
 		execSpec.Test.Shell, "-lc", execSpec.Test.Script,
-	}, testEnvForTarget(opts, target, packagePath))
+	)
+	_, stderr, runErr := runner.Run(ctx, "", "docker", args, nil)
 	if runErr != nil {
 		return fmt.Errorf("%s test failed: %w (stderr=%s)", target.Target, runErr, strings.TrimSpace(stderr))
 	}
@@ -245,6 +252,13 @@ func defaultPackageArch(inputArch string) string {
 	default:
 		return "x86_64"
 	}
+}
+
+func appendDockerEnvArgs(args []string, env []string) []string {
+	for _, entry := range env {
+		args = append(args, "--env", entry)
+	}
+	return args
 }
 
 func targetBinary(binaryPath string) string {

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -192,7 +193,18 @@ func (rm *ReleaseManager) createGitHubRelease(tag, name, body string, draft bool
 // For security-only releases where the binary version differs from the recorded version,
 // this function uses the database to find the actual filenames.
 func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version string) ([]string, error) {
-	var files []string
+	files := make([]string, 0)
+	seen := make(map[string]struct{})
+	appendFile := func(path string, info os.FileInfo) {
+		if info == nil || info.IsDir() || info.Size() == 0 {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		files = append(files, path)
+	}
 
 	// Get filenames from database for this version
 	// This handles cases where the binary version differs from recorded version
@@ -231,7 +243,7 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 		// 1. Match the version pattern in filename (original behavior)
 		// 2. OR are recorded in the database for this version (handles security-only releases)
 		if strings.Contains(info.Name(), version) || dbFilenames[info.Name()] {
-			files = append(files, path)
+			appendFile(path, info)
 		}
 
 		return nil
@@ -241,7 +253,66 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 		return nil, err
 	}
 
+	if err := rm.collectPackageArtifacts(outputDir, runtimeName, version, appendFile); err != nil {
+		return nil, err
+	}
+
 	return files, nil
+}
+
+func (rm *ReleaseManager) collectPackageArtifacts(outputDir, runtimeName, version string, appendFile func(path string, info os.FileInfo)) error {
+	packageEvidenceFiles := map[string]struct{}{
+		"package-build-results.json":   {},
+		"package-test-results.json":    {},
+		"package-manifest.built.json":  {},
+		"package-manifest.tested.json": {},
+		"package-promote-summary.json": {},
+	}
+
+	includePackageBinary := func(filename string) bool {
+		lower := strings.ToLower(filename)
+		if strings.HasSuffix(lower, ".rpm") ||
+			strings.HasSuffix(lower, ".apk") ||
+			strings.HasSuffix(lower, ".tgz") ||
+			strings.HasSuffix(lower, ".tar.gz") {
+			return strings.Contains(lower, strings.ToLower(runtimeName)) || strings.Contains(lower, strings.ToLower(version))
+		}
+		return false
+	}
+
+	baseDir := filepath.Dir(outputDir)
+	for _, root := range []string{filepath.Join(baseDir, "packages"), filepath.Join(baseDir, "artifacts")} {
+		rootInfo, err := os.Stat(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", root, err)
+		}
+		if !rootInfo.IsDir() {
+			continue
+		}
+		if err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() {
+				return nil
+			}
+			base := filepath.Base(path)
+			if _, ok := packageEvidenceFiles[base]; ok {
+				appendFile(path, info)
+				return nil
+			}
+			if includePackageBinary(base) {
+				appendFile(path, info)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("walk %s: %w", root, err)
+		}
+	}
+	return nil
 }
 
 // createScriptsZip creates a scripts zip from the repo's scripts/ directory.
@@ -623,6 +694,19 @@ type fileInfo struct {
 
 // getFileInfo extracts information about a file from its name and download results.
 func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult) (*fileInfo, error) {
+	switch filename {
+	case "package-build-results.json":
+		return &fileInfo{Type: "package_build_results", IsCommonFile: true}, nil
+	case "package-test-results.json":
+		return &fileInfo{Type: "package_test_results", IsCommonFile: true}, nil
+	case "package-manifest.built.json":
+		return &fileInfo{Type: "package_manifest_built", IsCommonFile: true}, nil
+	case "package-manifest.tested.json":
+		return &fileInfo{Type: "package_manifest_tested", IsCommonFile: true}, nil
+	case "package-promote-summary.json":
+		return &fileInfo{Type: "package_promote_summary", IsCommonFile: true}, nil
+	}
+
 	// scripts.zip (release-level) and scripts-{version}.zip (legacy) are common files we attach to releases.
 	if filename == "scripts.zip" || (strings.HasPrefix(filename, "scripts-") && strings.HasSuffix(filename, ".zip")) {
 		return &fileInfo{
@@ -645,6 +729,15 @@ func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult)
 		return &fileInfo{
 			Type:         "checksum_file",
 			IsCommonFile: true,
+		}, nil
+	}
+
+	if packageArtifactFilename(filename) {
+		return &fileInfo{
+			Version: extractVersionFromFilename(filename),
+			OS:      "linux",
+			Arch:    packageArchFromFilename(filename),
+			Type:    "binary",
 		}, nil
 	}
 
@@ -810,6 +903,11 @@ func contains(slice []string, val string) bool {
 // extractVersionFromFilename extracts version string from a filename.
 // Example: "node-v22.15.0-linux-x64.tar.xz" -> "22.15.0"
 func extractVersionFromFilename(filename string) string {
+	versionPattern := regexp.MustCompile(`\d+\.\d+\.\d+`)
+	if version := versionPattern.FindString(filename); version != "" {
+		return version
+	}
+
 	// Try to find version pattern like v22.15.0
 	parts := strings.Split(filename, "-")
 	for _, part := range parts {
@@ -818,4 +916,24 @@ func extractVersionFromFilename(filename string) string {
 		}
 	}
 	return ""
+}
+
+func packageArtifactFilename(filename string) bool {
+	lower := strings.ToLower(strings.TrimSpace(filename))
+	return strings.HasSuffix(lower, ".rpm") ||
+		strings.HasSuffix(lower, ".apk") ||
+		strings.HasSuffix(lower, ".tgz") ||
+		strings.HasSuffix(lower, ".tar.gz")
+}
+
+func packageArchFromFilename(filename string) string {
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.Contains(lower, "aarch64"), strings.Contains(lower, "arm64"):
+		return "aarch64"
+	case strings.Contains(lower, "x86_64"), strings.Contains(lower, "amd64"), strings.Contains(lower, "x64"):
+		return "x64"
+	default:
+		return "x64"
+	}
 }

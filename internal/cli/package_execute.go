@@ -19,6 +19,7 @@ import (
 )
 
 type packageExecuteSummary struct {
+	Stage         string `json:"stage"`
 	RunID         string `json:"run_id"`
 	TargetCount   int    `json:"target_count"`
 	BuildFailures int    `json:"build_failures"`
@@ -36,31 +37,20 @@ func packageExecute(c *cli.Context) error {
 	}
 
 	manifestPath := strings.TrimSpace(c.String("manifest"))
+	stage := strings.ToLower(strings.TrimSpace(c.String("stage")))
+	if stage == "" {
+		stage = "all"
+	}
+	switch stage {
+	case "all", "build", "test":
+	default:
+		return fmt.Errorf("invalid stage %q (supported: all, build, test)", stage)
+	}
+
 	buildResultsPath := strings.TrimSpace(c.String("build-results"))
 	testResultsPath := strings.TrimSpace(c.String("test-results"))
 	builtManifestPath := strings.TrimSpace(c.String("built-manifest"))
 	testedManifestPath := strings.TrimSpace(c.String("tested-manifest"))
-
-	manifest, err := ReadPackageManifest(manifestPath)
-	if err != nil {
-		return fmt.Errorf("read manifest: %w", err)
-	}
-
-	targets := make([]packageexec.Target, 0, len(manifest.Targets))
-	for _, target := range manifest.Targets {
-		targets = append(targets, packageexec.Target{
-			Runtime:       target.Runtime,
-			Version:       target.Version,
-			Target:        target.Target,
-			InputMode:     target.InputMode,
-			InputPath:     target.InputPath,
-			InputSHA256:   target.InputSHA256,
-			InputPlatform: target.InputPlatform,
-			InputArch:     target.InputArch,
-			PackageName:   target.PackageName,
-			InstallPrefix: target.InstallPrefix,
-		})
-	}
 
 	cfg, err := config.LoadConfig(c.String("config"))
 	if err != nil {
@@ -78,35 +68,80 @@ func packageExecute(c *cli.Context) error {
 	}
 
 	runner := packaging.RealRunner{}
-	builds, buildErr := packageexec.BuildTargets(context.Background(), runner, opts, manifest.RunID, targets)
-	if err := writeJSONFile(buildResultsPath, builds); err != nil {
-		return fmt.Errorf("write build results: %w", err)
-	}
 
-	builtManifest := manifestWithBuildStatus(manifest, builds)
-	if err := WritePackageManifest(builtManifestPath, builtManifest); err != nil {
-		return fmt.Errorf("write built manifest: %w", err)
-	}
-
-	testResults, testErr := packageexec.TestBuiltPackages(context.Background(), runner, opts, manifest.RunID, builds)
-	if err := writeJSONFile(testResultsPath, testResults); err != nil {
-		return fmt.Errorf("write test results: %w", err)
-	}
-
-	testedManifest := manifestWithTestStatus(builtManifest, testResults)
-	if err := WritePackageManifest(testedManifestPath, testedManifest); err != nil {
-		return fmt.Errorf("write tested manifest: %w", err)
+	var (
+		manifest   PackageManifest
+		builds     packageexec.BuildResultsFile
+		testResults promotion.TestResultsFile
+		buildErr   error
+		testErr    error
+	)
+	switch stage {
+	case "build":
+		manifest, err = ReadPackageManifest(manifestPath)
+		if err != nil {
+			return fmt.Errorf("read manifest: %w", err)
+		}
+		targets := manifestToExecTargets(manifest)
+		builds, buildErr = packageexec.BuildTargets(context.Background(), runner, opts, manifest.RunID, targets)
+		if err := writeJSONFile(buildResultsPath, builds); err != nil {
+			return fmt.Errorf("write build results: %w", err)
+		}
+		builtManifest := manifestWithBuildStatus(manifest, builds)
+		if err := WritePackageManifest(builtManifestPath, builtManifest); err != nil {
+			return fmt.Errorf("write built manifest: %w", err)
+		}
+	case "test":
+		manifest, err = ReadPackageManifest(builtManifestPath)
+		if err != nil {
+			return fmt.Errorf("read built manifest: %w", err)
+		}
+		builds, err = readBuildResults(buildResultsPath)
+		if err != nil {
+			return fmt.Errorf("read build results: %w", err)
+		}
+		testResults, testErr = packageexec.TestBuiltPackages(context.Background(), runner, opts, manifest.RunID, builds)
+		if err := writeJSONFile(testResultsPath, testResults); err != nil {
+			return fmt.Errorf("write test results: %w", err)
+		}
+		testedManifest := manifestWithTestStatus(manifest, testResults)
+		if err := WritePackageManifest(testedManifestPath, testedManifest); err != nil {
+			return fmt.Errorf("write tested manifest: %w", err)
+		}
+	default: // all
+		manifest, err = ReadPackageManifest(manifestPath)
+		if err != nil {
+			return fmt.Errorf("read manifest: %w", err)
+		}
+		targets := manifestToExecTargets(manifest)
+		builds, buildErr = packageexec.BuildTargets(context.Background(), runner, opts, manifest.RunID, targets)
+		if err := writeJSONFile(buildResultsPath, builds); err != nil {
+			return fmt.Errorf("write build results: %w", err)
+		}
+		builtManifest := manifestWithBuildStatus(manifest, builds)
+		if err := WritePackageManifest(builtManifestPath, builtManifest); err != nil {
+			return fmt.Errorf("write built manifest: %w", err)
+		}
+		testResults, testErr = packageexec.TestBuiltPackages(context.Background(), runner, opts, manifest.RunID, builds)
+		if err := writeJSONFile(testResultsPath, testResults); err != nil {
+			return fmt.Errorf("write test results: %w", err)
+		}
+		testedManifest := manifestWithTestStatus(builtManifest, testResults)
+		if err := WritePackageManifest(testedManifestPath, testedManifest); err != nil {
+			return fmt.Errorf("write tested manifest: %w", err)
+		}
 	}
 
 	summary := packageExecuteSummary{
-		RunID:          manifest.RunID,
-		TargetCount:    len(manifest.Targets),
-		BuildFailures:  countBuildFailures(builds),
-		TestFailures:   countTestFailures(testResults),
-		BuiltManifest:  builtManifestPath,
+		Stage:         stage,
+		RunID:         manifest.RunID,
+		TargetCount:   len(manifest.Targets),
+		BuildFailures: countBuildFailures(builds),
+		TestFailures:  countTestFailures(testResults),
+		BuiltManifest: builtManifestPath,
 		TestedManifest: testedManifestPath,
-		BuildResults:   buildResultsPath,
-		TestResults:    testResultsPath,
+		BuildResults:  buildResultsPath,
+		TestResults:   testResultsPath,
 	}
 	payload, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
@@ -118,6 +153,37 @@ func packageExecute(c *cli.Context) error {
 		return errors.Join(buildErr, testErr)
 	}
 	return nil
+}
+
+func readBuildResults(path string) (packageexec.BuildResultsFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return packageexec.BuildResultsFile{}, fmt.Errorf("read build results file: %w", err)
+	}
+	var out packageexec.BuildResultsFile
+	if err := json.Unmarshal(data, &out); err != nil {
+		return packageexec.BuildResultsFile{}, fmt.Errorf("unmarshal build results: %w", err)
+	}
+	return out, nil
+}
+
+func manifestToExecTargets(manifest PackageManifest) []packageexec.Target {
+	targets := make([]packageexec.Target, 0, len(manifest.Targets))
+	for _, target := range manifest.Targets {
+		targets = append(targets, packageexec.Target{
+			Runtime:       target.Runtime,
+			Version:       target.Version,
+			Target:        target.Target,
+			InputMode:     target.InputMode,
+			InputPath:     target.InputPath,
+			InputSHA256:   target.InputSHA256,
+			InputPlatform: target.InputPlatform,
+			InputArch:     target.InputArch,
+			PackageName:   target.PackageName,
+			InstallPrefix: target.InstallPrefix,
+		})
+	}
+	return targets
 }
 
 func writeJSONFile(path string, value interface{}) error {

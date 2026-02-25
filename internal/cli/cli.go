@@ -218,6 +218,7 @@ func NewApp() *cli.App {
 						Usage: "Run manifest-driven package build/test executors in containers (phase 2)",
 						Flags: []cli.Flag{
 							&cli.StringFlag{Name: "manifest", Required: true, Usage: "path to resolved package manifest JSON"},
+							&cli.StringFlag{Name: "stage", Value: "all", Usage: "execution stage (all, build, test)"},
 							&cli.StringFlag{Name: "build-results", Required: true, Usage: "path to write build results JSON"},
 							&cli.StringFlag{Name: "test-results", Required: true, Usage: "path to write test results JSON"},
 							&cli.StringFlag{Name: "built-manifest", Required: true, Usage: "path to write built manifest JSON"},
