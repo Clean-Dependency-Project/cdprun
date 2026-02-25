@@ -45,13 +45,21 @@ jobs:
           oras pull ghcr.io/${REPO_LOWER}/downloads-db:latest -o . || echo "No existing database found, starting fresh"
         continue-on-error: true
 
-      - name: Run download command
+      - name: Run download and packaging pipeline
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "GITHUB_TOKEN is set: ${{ secrets.GITHUB_TOKEN != '' }}"
           echo "Repository: ${{ github.repository }}"
-          ./bin/cdprun --log-level debug download
+          make run
+
+      - name: Verify packaging outputs
+        run: |
+          echo "Artifacts directory:"
+          ls -la artifacts/ || echo "No artifacts directory"
+          echo ""
+          echo "Packages directory:"
+          ls -la packages/ || echo "No packages directory"
 
       - name: Verify downloads and database
         run: |
@@ -94,6 +102,7 @@ jobs:
   deploy-site:
     name: Deploy Site to GitHub Pages
     runs-on: ubuntu-latest
+    if: ${{ github.ref_name == 'main' }}
     needs: download-runtimes
     permissions:
       contents: read

@@ -35,6 +35,15 @@ type Download struct {
 	FileExtension string
 	FileSize      int64
 	SourceURL     string `gorm:"not null"`
+	// LocalPath is the full path to the downloaded file on disk at the time it was recorded.
+	// This enables downstream steps (e.g., packaging) to consume the exact downloaded artifact.
+	LocalPath string `gorm:"type:text"`
+	// ContentSHA256 is the SHA256 of the on-disk content (computed locally).
+	// This is distinct from "ChecksumVerified", which describes upstream verification.
+	ContentSHA256 string `gorm:"type:varchar(64);index"`
+	// RunID correlates downloads created in a single `cdprun download` execution.
+	// Used to ensure we only act on newly-downloaded artifacts (not older ones).
+	RunID string `gorm:"type:varchar(64);index"`
 
 	// When
 	DownloadedAt time.Time `gorm:"not null"`
@@ -54,8 +63,8 @@ type Download struct {
 	Attested          bool      `gorm:"not null;default:false"`
 	AttestationFile   string    `gorm:"type:text"`
 	AttestedAt        time.Time `gorm:"type:datetime"`
-	AttestationIssuer string    `gorm:"type:varchar(50)"` // "github-actions" or "local"
-	RekorLogIndex     int64     `gorm:"default:0"`        // Rekor transparency log index
+	AttestationIssuer string    `gorm:"type:varchar(50)"`  // "github-actions" or "local"
+	RekorLogIndex     int64     `gorm:"default:0"`         // Rekor transparency log index
 	RekorLogID        string    `gorm:"type:varchar(128)"` // Rekor log entry ID
 
 	// Status
@@ -117,7 +126,7 @@ func InitDB(cfg Config) (*DB, error) {
 	}
 
 	// Auto-migrate schema
-	if err := db.AutoMigrate(&Download{}, &Release{}); err != nil {
+	if err := db.AutoMigrate(&Download{}, &Release{}, &PackageRecord{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
 

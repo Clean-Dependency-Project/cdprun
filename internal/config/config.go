@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/clean-dependency-project/cdprun/internal/platform"
@@ -22,6 +23,7 @@ var (
 	ErrChecksumPatternRequired   = errors.New("checksum_pattern is required when checksum is enabled")
 	ErrSignaturePatternRequired  = errors.New("signature_pattern is required when gpg is enabled")
 	ErrClamAVImageRequired       = errors.New("clamav image is required when clamav is enabled")
+	ErrPackagingTargetsRequired  = errors.New("packaging.targets is required when packaging is enabled")
 )
 
 // Config represents the top-level configuration structure.
@@ -51,6 +53,14 @@ type GlobalConfig struct {
 	AutoDownloadAllPlatforms bool          `yaml:"auto_download_all_platforms"`
 	Storage                  StorageConfig `yaml:"storage"`
 	IgnoreFile               string        `yaml:"ignore_file"` // Path to JSON file listing versions to ignore per runtime
+	PackagingExecution       PackagingExecutionConfig `yaml:"packaging_execution"`
+}
+
+// PackagingExecutionConfig controls package executor runtime defaults.
+type PackagingExecutionConfig struct {
+	WorkspaceDir   string `yaml:"workspace_dir"`
+	BinaryPath     string `yaml:"binary_path"`
+	DockerPlatform string `yaml:"docker_platform"`
 }
 
 // GetDownloadTimeout parses and returns the download timeout duration
@@ -79,6 +89,34 @@ type Runtime struct {
 	Verification           Verification       `yaml:"verification"`
 	EndOfLife              EndOfLifeConfig    `yaml:"endoflife"`
 	Release                ReleaseConfig      `yaml:"release"`
+	Packaging              PackagingConfig    `yaml:"packaging"`
+}
+
+// PackagingConfig represents OS package build configuration for a runtime.
+type PackagingConfig struct {
+	Enabled               bool     `yaml:"enabled"`
+	Targets               []string `yaml:"targets"`                  // Supported values: rpm, apk
+	PackageNameTemplate   string   `yaml:"package_name_template"`    // e.g. OSPO-{runtime}
+	InstallPrefixTemplate string   `yaml:"install_prefix_template"`  // e.g. /export/apps/citools/OSPO-{runtime}/{version}
+	Execution             PackagingExecutionTargets `yaml:"execution"`
+}
+
+// PackagingExecutionTargets holds runtime-specific container executor specs.
+type PackagingExecutionTargets struct {
+	Targets map[string]PackagingExecutionTarget `yaml:"targets"`
+}
+
+// PackagingExecutionTarget defines build/test container specs for one package target.
+type PackagingExecutionTarget struct {
+	Build PackagingExecutionContainer `yaml:"build"`
+	Test  PackagingExecutionContainer `yaml:"test"`
+}
+
+// PackagingExecutionContainer defines how to run one executor container stage.
+type PackagingExecutionContainer struct {
+	Image  string `yaml:"image"`
+	Shell  string `yaml:"shell"`
+	Script string `yaml:"script"`
 }
 
 // PlatformConfig represents platform-specific configuration.
@@ -262,6 +300,28 @@ func (r *Runtime) Validate(name string) error {
 
 	if err := r.Verification.Validate(); err != nil {
 		return fmt.Errorf("verification: %w", err)
+	}
+	if err := r.Packaging.Validate(); err != nil {
+		return fmt.Errorf("packaging: %w", err)
+	}
+	return nil
+}
+
+// Validate validates packaging configuration.
+func (p *PackagingConfig) Validate() error {
+	if !p.Enabled {
+		return nil
+	}
+	if len(p.Targets) == 0 {
+		return ErrPackagingTargetsRequired
+	}
+	for _, target := range p.Targets {
+		switch strings.ToLower(strings.TrimSpace(target)) {
+		case "rpm", "apk":
+			// allowed
+		default:
+			return fmt.Errorf("unsupported packaging target %q (supported: rpm, apk)", target)
+		}
 	}
 	return nil
 }

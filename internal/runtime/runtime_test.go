@@ -15,6 +15,7 @@ import (
 
 	"github.com/clean-dependency-project/cdprun/internal/endoflife"
 	"github.com/clean-dependency-project/cdprun/internal/platform"
+	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
 
 // mockRuntimeProvider implements RuntimeProvider for testing
@@ -579,10 +580,27 @@ func TestManager_DownloadRuntime(t *testing.T) {
 		{OS: "linux", Arch: "x64", FileExt: "tar.gz", Classifier: "linux-x64"},
 	}
 
+	db, err := storage.InitDB(storage.Config{DatabasePath: ":memory:", LogLevel: "silent"})
+	if err != nil {
+		t.Fatalf("InitDB() failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	tempDir, err := os.MkdirTemp("", "runtime-manager-db-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp() failed: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	outputPath := filepath.Join(tempDir, "test.tar.gz")
+	if err := os.WriteFile(outputPath, []byte("test payload"), 0644); err != nil {
+		t.Fatalf("WriteFile() failed: %v", err)
+	}
+
 	tasks := []DownloadTask{
 		{
 			URL:        "http://example.com/test.tar.gz",
-			OutputPath: "/tmp/test.tar.gz",
+			OutputPath: outputPath,
 			Platform:   platforms[0],
 			Runtime:    "python",
 			Version:    "3.13",
@@ -594,8 +612,8 @@ func TestManager_DownloadRuntime(t *testing.T) {
 		{
 			Task:      &tasks[0],
 			URL:       "http://example.com/test.tar.gz",
-			LocalPath: "/tmp/test.tar.gz",
-			FilePath:  "/tmp/test.tar.gz",
+			LocalPath: outputPath,
+			FilePath:  outputPath,
 			Platform:  platforms[0],
 			Runtime:   "python",
 			Version:   "3.13",
@@ -618,7 +636,8 @@ func TestManager_DownloadRuntime(t *testing.T) {
 	}
 	_ = registry.Register("python", provider)
 
-	manager := NewManager(registry, nil, slog.Default(), slog.Default())
+	manager := NewManager(registry, db, slog.Default(), slog.Default())
+	manager.SetRunID("test-run-123")
 
 	// Create version info to pass to DownloadRuntime
 	versionInfo := createTestVersionInfo("3.13", true)
@@ -628,7 +647,7 @@ func TestManager_DownloadRuntime(t *testing.T) {
 		"python",
 		versionInfo,
 		platforms,
-		"/tmp",
+		tempDir,
 		1,
 	)
 
@@ -644,6 +663,21 @@ func TestManager_DownloadRuntime(t *testing.T) {
 
 	if downloadResults[0].Size != 1024 {
 		t.Errorf("Manager.DownloadRuntime() got size %d, want 1024", downloadResults[0].Size)
+	}
+
+	// Verify DB record includes integrity and correlation fields.
+	got, err := db.GetDownload("python", versionInfo.LatestPatch, "linux", "x64")
+	if err != nil {
+		t.Fatalf("GetDownload() failed: %v", err)
+	}
+	if got.RunID != "test-run-123" {
+		t.Errorf("RunID = %q, want %q", got.RunID, "test-run-123")
+	}
+	if got.LocalPath != outputPath {
+		t.Errorf("LocalPath = %q, want %q", got.LocalPath, outputPath)
+	}
+	if got.ContentSHA256 == "" {
+		t.Error("ContentSHA256 is empty; expected computed sha256")
 	}
 }
 

@@ -1,4 +1,4 @@
-.PHONY: build test clean run run-auto
+.PHONY: build test clean run run-local run-auto run-download run-package-build run-package-test run-package-promote
 
 # Go parameters
 GOCMD=go
@@ -6,21 +6,27 @@ GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
-BINARY_NAME=cdprun
+BINARY_NAME=cdprun-host
 BINARY_PATH=bin/$(BINARY_NAME)
+# Binary used by Docker packaging scripts (must be Linux).
 ROOT_BINARY_NAME=cdprun
 ROOT_BINARY_PATH=bin/$(ROOT_BINARY_NAME)
 
 all: test build
 
 build: test
-	@echo "Building $(ROOT_BINARY_NAME)..."
-	@$(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
+	@echo "Building host binary ($(BINARY_NAME))..."
+	@mkdir -p bin
+	@$(GOBUILD) -o $(BINARY_PATH) ./cmd/runtime-cli/main.go
+	@echo "Building Linux binary ($(ROOT_BINARY_NAME)) for containers..."
+	@GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
 
 build-only:
-	@echo "Building $(ROOT_BINARY_NAME) (skipping tests)..."
+	@echo "Building host binary ($(BINARY_NAME)) (skipping tests)..."
 	@mkdir -p bin
-	@$(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
+	@$(GOBUILD) -o $(BINARY_PATH) ./cmd/runtime-cli/main.go
+	@echo "Building Linux binary ($(ROOT_BINARY_NAME)) for containers..."
+	@GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(ROOT_BINARY_PATH) ./cmd/runtime-cli/main.go
 
 test: deps
 	@echo "Running tests..."
@@ -83,7 +89,53 @@ build-all:
 	GOOS=windows GOARCH=amd64 $(GOBUILD) -o cdprun-demo-windows-amd64.exe -v
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o cdprun-demo-darwin-amd64 -v
 
-run: build
+run-download: build-only
+	@echo "Running download stage..."
+	@mkdir -p $(ARTIFACTS_DIR) $(DOWNLOADS_DIR) $(PACKAGES_DIR) bin
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error download --output json --output-dir $(DOWNLOADS_DIR) > $(ARTIFACTS_DIR)/download-summary.json
+
+run-package-build: build-only
+	@echo "Running package build stage..."
+	@test -f "$(PACKAGE_MANIFEST_RESOLVED)" || (echo "missing resolved manifest: $(PACKAGE_MANIFEST_RESOLVED)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR) $(PACKAGES_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+		--stage build \
+		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
+		--build-results $(PACKAGE_BUILD_RESULTS) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--built-manifest $(PACKAGE_MANIFEST_BUILT) \
+		--tested-manifest $(PACKAGE_MANIFEST_TESTED) \
+		--output json > $(PACKAGE_EXECUTE_BUILD_SUMMARY)
+
+run-package-test: build-only
+	@echo "Running package test stage..."
+	@test -f "$(PACKAGE_MANIFEST_BUILT)" || (echo "missing built manifest: $(PACKAGE_MANIFEST_BUILT)" && exit 1)
+	@test -f "$(PACKAGE_BUILD_RESULTS)" || (echo "missing build results: $(PACKAGE_BUILD_RESULTS)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+		--stage test \
+		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
+		--build-results $(PACKAGE_BUILD_RESULTS) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--built-manifest $(PACKAGE_MANIFEST_BUILT) \
+		--tested-manifest $(PACKAGE_MANIFEST_TESTED) \
+		--output json > $(PACKAGE_EXECUTE_TEST_SUMMARY)
+
+run-package-promote: build-only
+	@echo "Running package promotion stage..."
+	@test -f "$(PACKAGE_MANIFEST_TESTED)" || (echo "missing tested manifest: $(PACKAGE_MANIFEST_TESTED)" && exit 1)
+	@test -f "$(PACKAGE_TEST_RESULTS)" || (echo "missing test results: $(PACKAGE_TEST_RESULTS)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package promote \
+		--db ./downloads.db \
+		--manifest $(PACKAGE_MANIFEST_TESTED) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--output json > $(PACKAGE_PROMOTE_SUMMARY)
+
+run: run-download run-package-build run-package-test run-package-promote
+	@echo "Run completed: download -> build -> test -> promote"
+
+run-local: build
 	@echo "Running interactive demo..."
 	@./$(BINARY_PATH)
 
@@ -114,6 +166,23 @@ nexus-download-dry-run:
 # =============================================================================
 
 PYTHON_VERSION ?= 3.13.11
+NODEJS_VERSION ?= 22.22.0
+
+DOCKER_PLATFORM ?= linux/amd64
+
+ARTIFACTS_DIR ?= ./artifacts
+DOWNLOADS_DIR ?= ./downloads
+PACKAGES_DIR ?= ./packages
+RUNTIME_CONFIG ?= ./runtime-registry.yaml
+
+PACKAGE_MANIFEST_RESOLVED ?= $(DOWNLOADS_DIR)/package-manifest.resolved.json
+PACKAGE_MANIFEST_BUILT ?= $(ARTIFACTS_DIR)/package-manifest.built.json
+PACKAGE_MANIFEST_TESTED ?= $(ARTIFACTS_DIR)/package-manifest.tested.json
+PACKAGE_BUILD_RESULTS ?= $(ARTIFACTS_DIR)/package-build-results.json
+PACKAGE_TEST_RESULTS ?= $(ARTIFACTS_DIR)/package-test-results.json
+PACKAGE_EXECUTE_BUILD_SUMMARY ?= $(ARTIFACTS_DIR)/package-execute-build-summary.json
+PACKAGE_EXECUTE_TEST_SUMMARY ?= $(ARTIFACTS_DIR)/package-execute-test-summary.json
+PACKAGE_PROMOTE_SUMMARY ?= $(ARTIFACTS_DIR)/package-promote-summary.json
 
 # Build Python RPM for Amazon Linux 2023
 python-amazonlinux:
@@ -164,6 +233,39 @@ python-alpine-shell:
 	@echo "Starting interactive shell in Alpine Linux container..."
 	@docker run --rm -it -v $(PWD):/workspace -w /workspace alpine:3.19 /bin/sh
 
+# =============================================================================
+# Node.js Packaging Tests (Local Development)
+# Uses cdprun download + cdprun package + fresh install smoke tests.
+# NOTE: On Apple Silicon, set DOCKER_PLATFORM=linux/amd64 (default) for parity with CI.
+# =============================================================================
+
+nodejs-rpm-build:
+	@echo "Building Node.js $(NODEJS_VERSION) RPM (Docker: AL2023, $(DOCKER_PLATFORM))..."
+	@docker run --rm --platform=$(DOCKER_PLATFORM) -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -lc '\
+		set -euo pipefail && \
+		yum install -y --allowerasing ca-certificates git tar gzip findutils coreutils rpm-build rpmdevtools golang && yum clean all && \
+		go mod download && \
+		mkdir -p bin downloads packages && \
+		go build -o ./bin/cdprun ./cmd/runtime-cli/main.go && \
+		./bin/cdprun --log-level info download \
+			--runtime nodejs --version "$(NODEJS_VERSION)" --exact \
+			--platform linux-x64 --output json --output-dir ./downloads && \
+		./bin/cdprun --log-level info package rpm \
+			--runtime nodejs --version "$(NODEJS_VERSION)" \
+			--db ./downloads.db --input-platform linux --input-arch x64 \
+			--out-dir ./packages'
+
+nodejs-rpm-test: nodejs-rpm-build
+	@echo "Fresh-install testing Node.js $(NODEJS_VERSION) RPM (Docker: AL2023, $(DOCKER_PLATFORM))..."
+	@docker run --rm --platform=$(DOCKER_PLATFORM) -v $(PWD):/workspace -w /workspace amazonlinux:2023 /bin/bash -lc '\
+		set -euo pipefail && \
+		yum install -y ca-certificates bash && yum clean all && \
+		rpm -ivh ./packages/*.rpm && \
+		bash rpm/test-nodejs.sh "/export/apps/citools/OSPO-nodejs/$(NODEJS_VERSION)" "$(NODEJS_VERSION)"'
+
+nodejs-test: nodejs-rpm-test
+	@echo "Node.js RPM tests complete."
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-auto nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto run-download run-package-build run-package-test run-package-promote nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test

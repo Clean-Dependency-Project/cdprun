@@ -8,9 +8,13 @@ config:
  ignore_file: "policies/ignore-versions.yaml"
  storage:
    database_path: "./downloads.db"
+ packaging_execution:
+   workspace_dir: "."
+   binary_path: "./bin/cdprun"
+   docker_platform: "linux/amd64"
 runtimes:
   python:
-    enabled: true
+    enabled: false
     name: "Python"
     description: "High-level programming language"
     endoflife_product: "python"
@@ -53,10 +57,35 @@ runtimes:
       check_eol: true
       warn_on_eol: true
     release:
-      auto_release: true
+      auto_release: false
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Python Runtime Binaries - {version}"
+    packaging:
+      enabled: true
+      targets: ["rpm", "apk"]
+      package_name_template: "OSPO-{runtime}"
+      install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+      execution:
+        targets:
+          rpm:
+            build:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/python/rpm/build.sh"
+            test:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/python/rpm/test.sh"
+          apk:
+            build:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/python/apk/build.sh"
+            test:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/python/apk/test.sh"
   nodejs:
    enabled: true
    name: "Node.js"
@@ -101,12 +130,28 @@ runtimes:
      check_eol: true
      warn_on_eol: true
    release:
-     auto_release: true
+     auto_release: false
      github_repository: "Clean-Dependency-Project/cdprun"
      draft_release: false
      release_name_template: "Node.js Runtime Binaries - {version}"
+   packaging:
+     enabled: true
+     targets: ["rpm"]
+     package_name_template: "OSPO-{runtime}"
+     install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+     execution:
+       targets:
+         rpm:
+           build:
+             image: "amazonlinux:2023"
+             shell: "/bin/bash"
+             script: "bash /workspace/scripts/package/rpm/build.sh"
+           test:
+             image: "amazonlinux:2023"
+             shell: "/bin/bash"
+             script: "bash /workspace/scripts/package/rpm/test.sh"
   tomcat:
-    enabled: true
+    enabled: false
     name: "Apache Tomcat"
     description: "Apache Tomcat is an open source implementation of the Java Servlet, JavaServer Pages, Java Expression Language and Java WebSocket technologies"
     endoflife_product: "tomcat"
@@ -145,12 +190,37 @@ runtimes:
       check_eol: true
       warn_on_eol: true
     release:
-      auto_release: true
+      auto_release: false
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Apache Tomcat Runtime Binaries - {version}"
+    packaging:
+      enabled: false
+      targets: []
+      package_name_template: "OSPO-{runtime}"
+      install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+      execution:
+        targets:
+          rpm:
+            build:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/build.sh"
+            test:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/test.sh"
+          apk:
+            build:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/build.sh"
+            test:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/test.sh"
   yarn:
-    enabled: true
+    enabled: false
     name: "Yarn Classic"
     description: "Yarn package manager classic distribution"
     endoflife_product: "yarn"
@@ -192,7 +262,32 @@ runtimes:
       check_eol: true
       warn_on_eol: true
     release:
-      auto_release: true
+      auto_release: false
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Yarn Classic Runtime Binaries - {version}"
+    packaging:
+      enabled: false
+      targets: []
+      package_name_template: "OSPO-{runtime}"
+      install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
+      execution:
+        targets:
+          rpm:
+            build:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/build.sh"
+            test:
+              image: "amazonlinux:2023"
+              shell: "/bin/bash"
+              script: "bash /workspace/scripts/package/rpm/test.sh"
+          apk:
+            build:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/build.sh"
+            test:
+              image: "alpine:3.19"
+              shell: "/bin/sh"
+              script: "sh /workspace/scripts/package/apk/test.sh"
