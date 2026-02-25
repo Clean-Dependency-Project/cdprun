@@ -57,13 +57,13 @@ runtimes:
       check_eol: true
       warn_on_eol: true
     release:
-      auto_release: false
+      auto_release: true
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Python Runtime Binaries - {version}"
     packaging:
-      enabled: true
-      targets: ["rpm", "apk"]
+      enabled: false
+      targets: []
       package_name_template: "OSPO-{runtime}"
       install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
       execution:
@@ -130,7 +130,7 @@ runtimes:
      check_eol: true
      warn_on_eol: true
    release:
-     auto_release: false
+     auto_release: true
      github_repository: "Clean-Dependency-Project/cdprun"
      draft_release: false
      release_name_template: "Node.js Runtime Binaries - {version}"
@@ -190,7 +190,7 @@ runtimes:
       check_eol: true
       warn_on_eol: true
     release:
-      auto_release: false
+      auto_release: true
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Apache Tomcat Runtime Binaries - {version}"
@@ -262,7 +262,7 @@ runtimes:
       check_eol: true
       warn_on_eol: true
     release:
-      auto_release: false
+      auto_release: true
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "Yarn Classic Runtime Binaries - {version}"
