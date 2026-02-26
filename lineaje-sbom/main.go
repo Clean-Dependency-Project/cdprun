@@ -1,4 +1,4 @@
-// Package main provides the lineaje-sbom CLI for sending SBOM/pom components to the Lineaje explain API.
+// Package main provides the lineaje-sbom CLI to fix vulnerable dependencies using Lineaje recommendations (SBOM or pom.xml).
 package main
 
 import (
@@ -19,147 +19,285 @@ import (
 	"github.com/clean-dependency-project/cdprun/lineaje-sbom/internal/session"
 )
 
+const (
+	defaultQuery      = "recommend gos plan"
+	defaultPollDelay  = 5
+	defaultSessionDir = "./sessions"
+)
+
 func main() {
 	app := &cli.App{
 		Name:     "lineaje-sbom",
-		Usage:    "Parse SBOM or pom.xml, extract PURLs, and send to Lineaje explain API",
+		Usage:    "Fix vulnerable dependencies using Lineaje recommendations.",
 		Version:  "0.1.0",
 		Compiled: time.Now(),
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "sbom",
-				Aliases: []string{"s"},
-				Usage:   "path to CycloneDX SBOM file (JSON)",
-			},
-			&cli.StringFlag{
-				Name:    "pom",
-				Aliases: []string{"p"},
-				Usage:   "path to Maven pom.xml file",
-			},
-			&cli.StringFlag{
-				Name:    "query",
-				Aliases: []string{"q"},
-				Value:   "recommend gos plan",
-				Usage:   "query string for the explain API",
-			},
-			&cli.IntFlag{
-				Name:  "poll-delay",
-				Value: 5,
-				Usage: "seconds between poll attempts",
-			},
-			&cli.StringFlag{
-				Name:    "output",
-				Aliases: []string{"o"},
-				Value:   "table",
-				Usage:   "output format: table or json",
-			},
-			&cli.BoolFlag{
-				Name:  "debug",
-				Usage: "log HTTP request and response (method, URL, body) to stderr as JSON for auth and explain API",
-			},
-			&cli.StringFlag{
-				Name:    "save-session",
-				Usage:   "directory to save session files when API says still processing (default: ./sessions); one file per GUID",
-				Value:   "./sessions",
-			},
-			&cli.BoolFlag{
-				Name:  "no-save-session",
-				Usage: "disable saving sessions (overrides default)",
-			},
-			&cli.StringFlag{
-				Name:  "session",
-				Usage: "resume: path to a saved session file (e.g. ./sessions/<guid>.json); do not use with --sbom or --pom",
-			},
-			&cli.BoolFlag{
-				Name:  "login-only",
-				Usage: "only test login (uses LINEAJE_USERNAME and LINEAJE_PASSWORD); exit after success or failure",
-			},
-			&cli.BoolFlag{
-				Name:  "print-token",
-				Usage: "with --login-only: print the access token to stdout (e.g. for use with curl: TOKEN=$(lineaje-sbom --login-only --print-token))",
-			},
+		Description: `SBOM or pom.xml. Sessions auto-saved when Lineaje asks to wait. Use login and resume.`,
+		UsageText: `lineaje-sbom [options]
+   lineaje-sbom login [options]
+   lineaje-sbom resume --session <file> [options]`,
+		Flags: appFlags(),
+		Commands: []*cli.Command{
+			loginCommand(),
+			resumeCommand(),
 		},
-		Action: run,
+		Action: runDefault,
 	}
+
+	// Apple-style help with EXAMPLES
+	cli.AppHelpTemplate = `NAME:
+   {{.Name}} - {{.Usage}}
+
+DESCRIPTION:
+   {{.Description}}
+
+USAGE:
+   {{.UsageText}}
+
+COMMANDS:
+{{range .Commands}}{{if not .HideHelp}}   {{.Name}}{{ "\t"}}{{.Usage}}{{ "\n" }}{{end}}{{end}}
+
+OPTIONS:
+{{range .VisibleFlags}}   {{.}}
+{{end}}
+
+EXAMPLES:
+   lineaje-sbom --sbom sbom.json
+      Get a fix plan for vulnerable dependencies from your CycloneDX SBOM.
+
+   lineaje-sbom --pom pom.xml -o table
+      Get Lineaje recommendations for your Maven dependencies; show as a table.
+
+   lineaje-sbom login
+      Sign in using LINEAJE_USERNAME and LINEAJE_PASSWORD.
+
+   lineaje-sbom resume --session ./sessions/abc123.json
+      Continue a run (session was saved automatically when Lineaje asked to wait).
+
+{{if .Version}}
+VERSION:
+   {{.Version}}
+{{end}}
+`
 
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(c *cli.Context) error {
+// appFlags returns global flags for the default (explain) flow and backward compatibility.
+func appFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:    "sbom",
+			Aliases: []string{"s"},
+			Usage:   "Path to a CycloneDX SBOM (JSON).",
+		},
+		&cli.StringFlag{
+			Name:    "pom",
+			Aliases: []string{"p"},
+			Usage:   "Path to a Maven pom.xml.",
+		},
+		&cli.StringFlag{
+			Name:    "query",
+			Aliases: []string{"q"},
+			Value:   defaultQuery,
+			Usage:   "What to ask Lineaje (e.g. recommend a fix plan for your dependencies).",
+		},
+		&cli.IntFlag{
+			Name:  "poll-delay",
+			Value: defaultPollDelay,
+			Usage: "Seconds between poll attempts while waiting for results.",
+		},
+		&cli.StringFlag{
+			Name:    "output",
+			Aliases: []string{"o"},
+			Value:   "json",
+			Usage:   "How to print results: table or json.",
+		},
+		&cli.BoolFlag{
+			Name:  "debug",
+			Usage: "Log HTTP requests and responses to stderr (JSON).",
+		},
+		&cli.StringFlag{
+			Name:  "save-session",
+			Value: defaultSessionDir,
+			Usage: "Directory where we automatically save a session when Lineaje asks us to wait.",
+		},
+		&cli.BoolFlag{
+			Name:  "no-save-session",
+			Usage: "Do not automatically save sessions when Lineaje asks to wait.",
+		},
+		// Backward compatibility: same behavior as 'resume' command
+		&cli.StringFlag{
+			Name:   "session",
+			Usage:  "Path to a saved session file to resume (same as 'resume --session').",
+			Hidden: true,
+		},
+		// Backward compatibility: same behavior as 'login' command
+		&cli.BoolFlag{
+			Name:   "login-only",
+			Usage:  "Sign in and exit (same as 'login' command).",
+			Hidden: true,
+		},
+		&cli.BoolFlag{
+			Name:   "print-token",
+			Usage:  "With --login-only: print the access token to stdout.",
+			Hidden: true,
+		},
+	}
+}
+
+func loginCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "login",
+		Usage: "Sign in or get an access token.",
+		Description: `Uses LINEAJE_USERNAME and LINEAJE_PASSWORD. Use --print-token for the token.`,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "print-token",
+				Usage: "Print the access token to stdout.",
+			},
+			&cli.StringFlag{
+				Name:    "output",
+				Aliases: []string{"o"},
+				Value:   "json",
+				Usage:   "How to print the result: table or json.",
+			},
+		},
+		Action: runLogin,
+	}
+}
+
+func resumeCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "resume",
+		Aliases: []string{"r"},
+		Usage:   "Continue a previous run from a saved session.",
+		Description: `Sessions auto-saved when Lineaje asks to wait. Stored under --save-session (default: ./sessions).`,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "session",
+				Aliases:  []string{"s"},
+				Usage:    "Path to the saved session file (e.g. ./sessions/<guid>.json).",
+				Required: true,
+			},
+			&cli.IntFlag{
+				Name:  "poll-delay",
+				Value: defaultPollDelay,
+				Usage: "Seconds between poll attempts.",
+			},
+			&cli.StringFlag{
+				Name:    "output",
+				Aliases: []string{"o"},
+				Value:   "json",
+				Usage:   "How to print results: table or json.",
+			},
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "Log HTTP requests and responses to stderr (JSON).",
+			},
+		},
+		Action: runResume,
+	}
+}
+
+func runDefault(c *cli.Context) error {
+	// Backward compatibility: --login-only runs login flow
+	if c.Bool("login-only") {
+		return runLogin(c)
+	}
+	// Backward compatibility: --session runs resume flow
+	if c.String("session") != "" {
+		return runResume(c)
+	}
+	return runExplain(c)
+}
+
+func runLogin(c *cli.Context) error {
 	level := slog.LevelInfo
 	if c.Bool("debug") {
 		level = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	if c.Bool("login-only") {
-		cfg := auth.DefaultConfig()
-		cfg.Logger = logger
-		token, err := auth.GetToken(cfg)
-		if err != nil {
-			return fmt.Errorf("login: %w", err)
-		}
-		if c.Bool("print-token") {
-			fmt.Fprintln(os.Stdout, token)
-			return nil
-		}
-		if c.String("output") == "json" {
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "ok", "token_preview": token[:min(20, len(token))] + "..."})
-		} else {
-			fmt.Fprintln(os.Stdout, "Login OK")
-		}
+	cfg := auth.DefaultConfig()
+	cfg.Logger = logger
+	token, err := auth.GetToken(cfg)
+	if err != nil {
+		return fmt.Errorf("login: %w", err)
+	}
+	if c.Bool("print-token") {
+		fmt.Fprintln(os.Stdout, token)
 		return nil
 	}
+	outputFormat := c.String("output")
+	if outputFormat == "json" {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "ok", "token_preview": token[:min(20, len(token))] + "..."})
+	} else {
+		fmt.Fprintln(os.Stdout, "Login OK")
+	}
+	return nil
+}
+
+func runResume(c *cli.Context) error {
+	level := slog.LevelInfo
+	if c.Bool("debug") {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	sessionPath := c.String("session")
+	if sessionPath == "" {
+		return cli.Exit("--session is required", 1)
+	}
+
+	sess, err := session.Load(sessionPath)
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	authCfg := auth.DefaultConfig()
+	authCfg.Logger = logger
+	token, err := auth.GetToken(authCfg)
+	if err != nil {
+		return fmt.Errorf("login: %w", err)
+	}
+	pollSec := c.Int("poll-delay")
+	if pollSec <= 0 {
+		pollSec = defaultPollDelay
+	}
+	clientCfg := client.DefaultConfig()
+	clientCfg.Token = token
+	clientCfg.Query = sess.Query
+	clientCfg.Components = sess.Components
+	clientCfg.PollDelay = time.Duration(pollSec) * time.Second
+	clientCfg.Logger = logger
+	clientCfg.InitialGUID = sess.GUID
+	responseBytes, err := client.Call(clientCfg)
+	if err != nil {
+		return fmt.Errorf("explain API: %w", err)
+	}
+	outputFormat := c.String("output")
+	if err := output.Write(os.Stdout, responseBytes, outputFormat); err != nil {
+		return fmt.Errorf("output: %w", err)
+	}
+	return nil
+}
+
+func runExplain(c *cli.Context) error {
+	level := slog.LevelInfo
+	if c.Bool("debug") {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
 	sbomPath := c.String("sbom")
 	pomPath := c.String("pom")
 
-	if sessionPath != "" {
-		// Resume path: require no sbom/pom
-		if sbomPath != "" || pomPath != "" {
-			return cli.Exit("use either --sbom/--pom or --session, not both", 1)
-		}
-		sess, err := session.Load(sessionPath)
-		if err != nil {
-			return fmt.Errorf("load session: %w", err)
-		}
-		authCfg := auth.DefaultConfig()
-		authCfg.Logger = logger
-		token, err := auth.GetToken(authCfg)
-		if err != nil {
-			return fmt.Errorf("login: %w", err)
-		}
-		pollSec := c.Int("poll-delay")
-		if pollSec <= 0 {
-			pollSec = 5
-		}
-		clientCfg := client.DefaultConfig()
-		clientCfg.Token = token
-		clientCfg.Query = sess.Query
-		clientCfg.Components = sess.Components
-		clientCfg.PollDelay = time.Duration(pollSec) * time.Second
-		clientCfg.Logger = logger
-		clientCfg.InitialGUID = sess.GUID
-		responseBytes, err := client.Call(clientCfg)
-		if err != nil {
-			return fmt.Errorf("explain API: %w", err)
-		}
-		outputFormat := c.String("output")
-		if err := output.Write(os.Stdout, responseBytes, outputFormat); err != nil {
-			return fmt.Errorf("output: %w", err)
-		}
-		return nil
-	}
-
-	// Normal path: exactly one of sbom or pom
 	if sbomPath == "" && pomPath == "" {
-		return cli.Exit("exactly one of --sbom, --pom or --session is required", 1)
+		return cli.Exit("provide one of --sbom or --pom to get fix recommendations for your dependencies", 1)
 	}
 	if sbomPath != "" && pomPath != "" {
-		return cli.Exit("cannot use both --sbom and --pom", 1)
+		return cli.Exit("use either --sbom or --pom, not both", 1)
 	}
 
 	var purls []string
@@ -182,7 +320,7 @@ func run(c *cli.Context) error {
 
 	pollSec := c.Int("poll-delay")
 	if pollSec <= 0 {
-		pollSec = 5
+		pollSec = defaultPollDelay
 	}
 	clientCfg := client.DefaultConfig()
 	clientCfg.Token = token
@@ -201,7 +339,6 @@ func run(c *cli.Context) error {
 				Query:      query,
 				Components: components,
 				CreatedAt:  time.Now().UTC().Format(time.RFC3339),
-				// Do not store API response content (e.g. message) in session
 			}
 			if err := session.Save(saveSessionDir, s); err != nil {
 				logger.Warn("save session failed", "err", err, "guid", guid)
@@ -217,7 +354,6 @@ func run(c *cli.Context) error {
 		return fmt.Errorf("explain API: %w", err)
 	}
 
-	// Only remove the session file when we got a final answer; if still "processing", keep it so user can resume
 	if saveSessions && savedGUID != "" {
 		var final struct {
 			Answer interface{} `json:"answer"`
