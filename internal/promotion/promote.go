@@ -89,11 +89,17 @@ type Store interface {
 	UpsertPackageRecord(record *storage.PackageRecord) error
 }
 
+// ReleaseAssetUploader uploads package assets to an existing release and
+// returns the asset download URL.
+type ReleaseAssetUploader interface {
+	UploadPackageAsset(runtime, releaseTag, packagePath, uploadFilename string) (string, error)
+}
+
 // PromoteTestedPackages applies strict all-or-nothing promotion gating.
 //
 // If any target is blocked, ErrBlocked is returned and callers should treat
 // the operation as failed.
-func PromoteTestedPackages(db Store, runID string, targets []Target, testResults TestResultsFile) (Summary, error) {
+func PromoteTestedPackages(db Store, uploader ReleaseAssetUploader, runID string, targets []Target, testResults TestResultsFile) (Summary, error) {
 	if db == nil {
 		return Summary{}, fmt.Errorf("database is required")
 	}
@@ -116,7 +122,7 @@ func PromoteTestedPackages(db Store, runID string, targets []Target, testResults
 		return summary, ErrBlocked
 	}
 
-	promotedCount, err := applyEligiblePromotions(db, eligible)
+	promotedCount, err := applyEligiblePromotions(db, uploader, eligible)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -211,11 +217,11 @@ func gateTarget(
 	return result, nil, nil
 }
 
-func applyEligiblePromotions(db Store, eligible []entryAndResult) (int, error) {
+func applyEligiblePromotions(db Store, uploader ReleaseAssetUploader, eligible []entryAndResult) (int, error) {
 	now := time.Now().UTC()
 	promotedCount := 0
 	for _, item := range eligible {
-		if err := promoteOne(db, item, now); err != nil {
+		if err := promoteOne(db, uploader, item, now); err != nil {
 			return 0, err
 		}
 		promotedCount++
@@ -223,8 +229,8 @@ func applyEligiblePromotions(db Store, eligible []entryAndResult) (int, error) {
 	return promotedCount, nil
 }
 
-func promoteOne(db Store, item entryAndResult, promotedAt time.Time) error {
-	resultWithURL, err := withResolvedPackageURL(db, item.target, item.result)
+func promoteOne(db Store, uploader ReleaseAssetUploader, item entryAndResult, promotedAt time.Time) error {
+	resultWithURL, err := withResolvedPackageURL(db, uploader, item.target, item.result)
 	if err != nil {
 		return fmt.Errorf("resolve package url for %s@%s %s: %w", item.target.Runtime, item.target.Version, item.target.Target, err)
 	}
@@ -257,7 +263,7 @@ func promoteOne(db Store, item entryAndResult, promotedAt time.Time) error {
 	return nil
 }
 
-func withResolvedPackageURL(db Store, target Target, result TestResult) (TestResult, error) {
+func withResolvedPackageURL(db Store, uploader ReleaseAssetUploader, target Target, result TestResult) (TestResult, error) {
 	url := strings.TrimSpace(result.PackageURL)
 	if url != "" {
 		return result, nil
@@ -296,7 +302,27 @@ func withResolvedPackageURL(db Store, target Target, result TestResult) (TestRes
 			return result, nil
 		}
 	}
-	return TestResult{}, fmt.Errorf("uploaded release URL not found for package filename %q", filename)
+	if uploader == nil {
+		return TestResult{}, fmt.Errorf("uploaded release URL not found for package filename %q and uploader is not configured", filename)
+	}
+	packagePath := strings.TrimSpace(result.PackagePath)
+	if packagePath == "" {
+		return TestResult{}, fmt.Errorf("uploaded release URL not found for package filename %q and package_path is empty", filename)
+	}
+	releaseTag := strings.TrimSpace(release.ReleaseTag)
+	if releaseTag == "" {
+		return TestResult{}, fmt.Errorf("uploaded release URL not found for package filename %q and release_tag is empty", filename)
+	}
+
+	uploadedURL, err := uploader.UploadPackageAsset(target.Runtime, releaseTag, packagePath, filename)
+	if err != nil {
+		return TestResult{}, fmt.Errorf("upload package asset for %s@%s %s: %w", target.Runtime, target.Version, target.Target, err)
+	}
+	if strings.TrimSpace(uploadedURL) == "" {
+		return TestResult{}, fmt.Errorf("upload package asset for %s@%s %s returned empty url", target.Runtime, target.Version, target.Target)
+	}
+	result.PackageURL = strings.TrimSpace(uploadedURL)
+	return result, nil
 }
 
 func entryKey(runtime, version, target, inputSHA256, packageName, installPrefix string) string {

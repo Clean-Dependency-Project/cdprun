@@ -50,7 +50,7 @@ func TestPromoteTestedPackages_SuccessAndIdempotent(t *testing.T) {
 		},
 	}
 
-	summary, err := PromoteTestedPackages(db, "run-1", targets, results)
+	summary, err := PromoteTestedPackages(db, nil, "run-1", targets, results)
 	if err != nil {
 		t.Fatalf("PromoteTestedPackages() error: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestPromoteTestedPackages_SuccessAndIdempotent(t *testing.T) {
 		t.Fatalf("unexpected summary after first run: %+v", summary)
 	}
 
-	summary, err = PromoteTestedPackages(db, "run-1", targets, results)
+	summary, err = PromoteTestedPackages(db, nil, "run-1", targets, results)
 	if err != nil {
 		t.Fatalf("PromoteTestedPackages() second run error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestPromoteTestedPackages_BlockedOnMissingOrFailedResults_NoMutation(t *tes
 				},
 			}
 
-			summary, err := PromoteTestedPackages(db, "run-1", targets, tt.results)
+			summary, err := PromoteTestedPackages(db, nil, "run-1", targets, tt.results)
 			if !errors.Is(err, ErrBlocked) {
 				t.Fatalf("PromoteTestedPackages() error = %v, want ErrBlocked", err)
 			}
@@ -211,7 +211,7 @@ func TestPromoteTestedPackages_BlockedOnMissingRelease_NoMutation(t *testing.T) 
 		},
 	}
 
-	summary, err := PromoteTestedPackages(db, "run-1", targets, results)
+	summary, err := PromoteTestedPackages(db, nil, "run-1", targets, results)
 	if !errors.Is(err, ErrBlocked) {
 		t.Fatalf("PromoteTestedPackages() error = %v, want ErrBlocked", err)
 	}
@@ -271,13 +271,131 @@ func TestPromoteTestedPackages_ResolvesURLFromReleaseArtifactsByPackagePath(t *t
 		},
 	}
 
-	summary, err := PromoteTestedPackages(db, "run-1", targets, results)
+	summary, err := PromoteTestedPackages(db, nil, "run-1", targets, results)
 	if err != nil {
 		t.Fatalf("PromoteTestedPackages() error: %v", err)
 	}
 	if summary.PromotedEntries != 1 || summary.BlockedEntries != 0 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
+}
+
+func TestPromoteTestedPackages_UploadsPackageAssetWhenURLMissing(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+	if err := seedRelease(t, db, "nodejs", "22.22.0", "nodejs-v22.22.0-test"); err != nil {
+		t.Fatalf("seedRelease() error: %v", err)
+	}
+
+	targets := []Target{{
+		Runtime:       "nodejs",
+		Version:       "22.22.0",
+		Target:        "rpm",
+		InputPlatform: "linux",
+		InputArch:     "x64",
+		InputSHA256:   "in-sha-upload",
+		PackageName:   "OSPO-nodejs",
+		InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
+		Tested:        true,
+	}}
+	results := TestResultsFile{
+		RunID: "run-1",
+		Results: []TestResult{{
+			Runtime:         "nodejs",
+			Version:         "22.22.0",
+			Target:          "rpm",
+			InputSHA256:     "in-sha-upload",
+			PackageName:     "OSPO-nodejs",
+			InstallPrefix:   "/export/apps/citools/OSPO-nodejs/22.22.0",
+			Passed:          true,
+			PackagePath:     "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
+			PackageFilename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
+			PackageSHA256:   "pkg-sha-upload",
+			PackageSize:     4096,
+		}},
+	}
+
+	uploader := &mockReleaseAssetUploader{
+		uploadFn: func(runtime, releaseTag, packagePath, uploadFilename string) (string, error) {
+			if runtime != "nodejs" || releaseTag != "nodejs-v22.22.0-test" {
+				t.Fatalf("unexpected uploader context: runtime=%q releaseTag=%q", runtime, releaseTag)
+			}
+			if uploadFilename != "OSPO-nodejs-22.22.0-1.x86_64.rpm" {
+				t.Fatalf("unexpected upload filename: %q", uploadFilename)
+			}
+			return "https://example.com/releases/download/nodejs-v22.22.0-test/OSPO-nodejs-22.22.0-1.x86_64.rpm", nil
+		},
+	}
+
+	summary, err := PromoteTestedPackages(db, uploader, "run-1", targets, results)
+	if err != nil {
+		t.Fatalf("PromoteTestedPackages() error: %v", err)
+	}
+	if summary.PromotedEntries != 1 || summary.BlockedEntries != 0 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+	if uploader.calls != 1 {
+		t.Fatalf("uploader calls = %d, want 1", uploader.calls)
+	}
+}
+
+func TestPromoteTestedPackages_UploadFailureReturnsError(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+	if err := seedRelease(t, db, "nodejs", "22.22.0", "nodejs-v22.22.0-test"); err != nil {
+		t.Fatalf("seedRelease() error: %v", err)
+	}
+
+	targets := []Target{{
+		Runtime:       "nodejs",
+		Version:       "22.22.0",
+		Target:        "rpm",
+		InputPlatform: "linux",
+		InputArch:     "x64",
+		InputSHA256:   "in-sha-upload-fail",
+		PackageName:   "OSPO-nodejs",
+		InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
+		Tested:        true,
+	}}
+	results := TestResultsFile{
+		RunID: "run-1",
+		Results: []TestResult{{
+			Runtime:         "nodejs",
+			Version:         "22.22.0",
+			Target:          "rpm",
+			InputSHA256:     "in-sha-upload-fail",
+			PackageName:     "OSPO-nodejs",
+			InstallPrefix:   "/export/apps/citools/OSPO-nodejs/22.22.0",
+			Passed:          true,
+			PackagePath:     "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
+			PackageFilename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
+			PackageSHA256:   "pkg-sha-upload-fail",
+			PackageSize:     4096,
+		}},
+	}
+
+	uploader := &mockReleaseAssetUploader{
+		uploadFn: func(runtime, releaseTag, packagePath, uploadFilename string) (string, error) {
+			return "", errors.New("upload failed")
+		},
+	}
+
+	if _, err := PromoteTestedPackages(db, uploader, "run-1", targets, results); err == nil {
+		t.Fatal("PromoteTestedPackages() error = nil, want non-nil")
+	}
+}
+
+type mockReleaseAssetUploader struct {
+	uploadFn func(runtime, releaseTag, packagePath, uploadFilename string) (string, error)
+	calls    int
+}
+
+func (m *mockReleaseAssetUploader) UploadPackageAsset(runtime, releaseTag, packagePath, uploadFilename string) (string, error) {
+	m.calls++
+	if m.uploadFn == nil {
+		return "", nil
+	}
+	return m.uploadFn(runtime, releaseTag, packagePath, uploadFilename)
 }
 
 func createTestDB(t *testing.T) (*storage.DB, func()) {

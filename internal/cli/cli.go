@@ -498,7 +498,16 @@ func packagePromote(c *cli.Context) error {
 		"manifest", manifestPath,
 		"test_results", testResultsPath)
 
-	summary, err := PromoteTestedPackagesFromFiles(db, manifestPath, testResultsPath)
+	manifest, err := ReadPackageManifest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read package manifest: %w", err)
+	}
+	uploader, err := BuildPromotionUploader(c.String("config"), os.Getenv("GITHUB_TOKEN"), manifest)
+	if err != nil {
+		return fmt.Errorf("build promotion uploader: %w", err)
+	}
+
+	summary, err := PromoteTestedPackagesFromFilesWithUploader(db, manifestPath, testResultsPath, uploader)
 	out, marshalErr := json.MarshalIndent(summary, "", "  ")
 	if marshalErr != nil {
 		return fmt.Errorf("marshal promotion summary: %w", marshalErr)
@@ -512,6 +521,31 @@ func packagePromote(c *cli.Context) error {
 			return err
 		}
 		stderr.Error("package promotion failed", "error", err)
+		return err
+	}
+
+	releaseTagsByRuntime := make(map[string]string)
+	for _, target := range manifest.Targets {
+		runtimeName := strings.TrimSpace(target.Runtime)
+		version := strings.TrimSpace(target.Version)
+		if runtimeName == "" || version == "" {
+			continue
+		}
+		if _, exists := releaseTagsByRuntime[runtimeName]; exists {
+			continue
+		}
+		release, getErr := db.GetRelease(runtimeName, version)
+		if getErr != nil {
+			stderr.Warn("failed to resolve release tag for evidence upload", "runtime", runtimeName, "version", version, "error", getErr)
+			continue
+		}
+		tag := strings.TrimSpace(release.ReleaseTag)
+		if tag != "" {
+			releaseTagsByRuntime[runtimeName] = tag
+		}
+	}
+	if err := UploadPromotionEvidenceFiles(uploader, releaseTagsByRuntime, testResultsPath); err != nil {
+		stderr.Error("failed to upload promotion evidence files", "error", err)
 		return err
 	}
 
