@@ -498,7 +498,16 @@ func packagePromote(c *cli.Context) error {
 		"manifest", manifestPath,
 		"test_results", testResultsPath)
 
-	summary, err := PromoteTestedPackagesFromFiles(db, manifestPath, testResultsPath)
+	manifest, err := ReadPackageManifest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read package manifest: %w", err)
+	}
+	uploader, err := BuildPromotionUploader(c.String("config"), os.Getenv("GITHUB_TOKEN"), manifest)
+	if err != nil {
+		return fmt.Errorf("build promotion uploader: %w", err)
+	}
+
+	summary, err := PromoteTestedPackagesFromFilesWithUploader(db, manifestPath, testResultsPath, uploader)
 	out, marshalErr := json.MarshalIndent(summary, "", "  ")
 	if marshalErr != nil {
 		return fmt.Errorf("marshal promotion summary: %w", marshalErr)
