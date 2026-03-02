@@ -30,6 +30,7 @@ type Config struct {
 	BaseURL            string
 	Token              string
 	Query              string
+	SBOMID             string
 	Components         []string
 	PollDelay          time.Duration
 	MaxPolls           int
@@ -52,8 +53,9 @@ func DefaultConfig() Config {
 // explainRequest is the JSON body sent to the API.
 type explainRequest struct {
 	Query    string            `json:"query"`
+	SBOMID   string            `json:"sbom_id,omitempty"`
 	GUID     string            `json:"guid,omitempty"`
-	Metadata explainMetadata   `json:"metadata"`
+	Metadata *explainMetadata  `json:"metadata,omitempty"`
 }
 
 type explainMetadata struct {
@@ -73,8 +75,8 @@ func Call(cfg Config) ([]byte, error) {
 	if cfg.Token == "" {
 		return nil, fmt.Errorf("token is required")
 	}
-	if len(cfg.Components) == 0 {
-		return nil, fmt.Errorf("at least one component PURL is required")
+	if cfg.SBOMID == "" && len(cfg.Components) == 0 {
+		return nil, fmt.Errorf("sbom_id or at least one component PURL is required")
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = defaultExplainURL
@@ -86,13 +88,9 @@ func Call(cfg Config) ([]byte, error) {
 		cfg.Timeout = 60 * time.Second
 	}
 
-	reqBody := explainRequest{
-		Query:    cfg.Query,
-		Metadata: explainMetadata{Components: cfg.Components},
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+	reqBody := explainRequest{Query: cfg.Query, SBOMID: cfg.SBOMID}
+	if len(cfg.Components) > 0 {
+		reqBody.Metadata = &explainMetadata{Components: cfg.Components}
 	}
 
 	httpClient := &http.Client{Timeout: cfg.Timeout}
@@ -103,11 +101,6 @@ func Call(cfg Config) ([]byte, error) {
 	if cfg.InitialGUID != "" {
 		// Resume path: skip first request, poll only with saved guid
 		guid = cfg.InitialGUID
-		reqBody.GUID = guid
-		bodyBytes, err = json.Marshal(reqBody)
-		if err != nil {
-			return nil, fmt.Errorf("marshal poll request: %w", err)
-		}
 		if cfg.Logger != nil {
 			cfg.Logger.Info("resuming with saved session, will poll",
 				"status", "resuming",
@@ -117,6 +110,10 @@ func Call(cfg Config) ([]byte, error) {
 		}
 	} else {
 		// First request: no guid
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request: %w", err)
+		}
 		respBytes, err = doRequest(httpClient, cfg.BaseURL, cfg.Token, bodyBytes, cfg.Logger)
 		if err != nil {
 			return nil, fmt.Errorf("initial request: %w", err)
@@ -135,7 +132,7 @@ func Call(cfg Config) ([]byte, error) {
 		}
 		// Notify caller when still processing so they can save session
 		msg := first.Message
-		if guid != "" && stillProcessingRE.MatchString(msg) && cfg.OnStillProcessing != nil {
+		if guid != "" && cfg.OnStillProcessing != nil {
 			cfg.OnStillProcessing(guid, cfg.Query, cfg.Components, msg)
 		}
 		if cfg.Logger != nil {
@@ -150,7 +147,7 @@ func Call(cfg Config) ([]byte, error) {
 	for i := 0; i < cfg.MaxPolls; i++ {
 		time.Sleep(cfg.PollDelay)
 		reqBody.GUID = guid
-		bodyBytes, err = json.Marshal(reqBody)
+		bodyBytes, err := json.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal poll request: %w", err)
 		}

@@ -1,0 +1,25 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:4b8f8de1-c1fb-4ad3-a134-11b19442a3b2",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-03-02T17:45:00Z",
+    "component": {
+      "type": "application",
+      "group": "com.example",
+      "name": "single-java-dep",
+      "version": "1.0.0",
+      "purl": "pkg:maven/com.example/single-java-dep@1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "group": "org.slf4j",
+      "name": "slf4j-api",
+      "version": "2.0.13",
+      "purl": "pkg:maven/org.slf4j/slf4j-api@2.0.13"
+    }
+  ]
+}
