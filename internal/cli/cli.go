@@ -293,7 +293,11 @@ func packageRPM(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("open db: %w", err)
 		}
-		defer func() { _ = db.Close() }()
+		defer func() {
+			if closeErr := db.Close(); closeErr != nil {
+				stderr.Error("close db", "error", closeErr)
+			}
+		}()
 
 		platform := c.String("input-platform")
 		arch := c.String("input-arch")
@@ -395,7 +399,11 @@ func packageAPK(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("open db: %w", err)
 		}
-		defer func() { _ = db.Close() }()
+		defer func() {
+			if closeErr := db.Close(); closeErr != nil {
+				stderr.Error("close db", "error", closeErr)
+			}
+		}()
 
 		platform := c.String("input-platform")
 		arch := c.String("input-arch")
@@ -480,7 +488,11 @@ func packagePromote(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			stderr.Error("close db", "error", closeErr)
+		}
+	}()
 
 	stdout.Info("starting package promotion",
 		"manifest", manifestPath,
