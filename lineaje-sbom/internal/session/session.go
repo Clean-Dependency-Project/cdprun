@@ -12,11 +12,14 @@ import (
 // It is persisted as JSON; no token or credentials are stored.
 // API response content (e.g. message) is not stored.
 type Session struct {
-	GUID       string   `json:"guid"`
-	Query      string   `json:"query"`
-	Components []string `json:"components"`
-	CreatedAt  string   `json:"created_at,omitempty"`
-	Message    string   `json:"message,omitempty"` // not set on save; only for backward compatibility when loading
+	SessionKey    string          `json:"session_key,omitempty"`
+	GUID          string          `json:"guid"`
+	SBOMID        string          `json:"sbom_id"`
+	Query         string          `json:"query"`
+	Components    []string        `json:"components"`
+	CreatedAt     string          `json:"created_at,omitempty"`
+	Message       string          `json:"message,omitempty"` // not set on save; only for backward compatibility when loading
+	UploadPayload json.RawMessage `json:"upload_payload"`
 }
 
 // Load reads a session from the file at path (e.g. ./sessions/<guid>.json).
@@ -38,7 +41,17 @@ func Save(dir string, s Session) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	path := filepath.Join(dir, s.GUID+".json")
+	fileKey := s.SessionKey
+	if fileKey == "" {
+		fileKey = s.GUID
+	}
+	if fileKey == "" {
+		fileKey = s.SBOMID
+	}
+	if fileKey == "" {
+		return os.ErrInvalid
+	}
+	path := filepath.Join(dir, fileKey+".json")
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err

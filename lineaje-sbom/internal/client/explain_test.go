@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,7 +30,68 @@ func TestCall_EmptyComponents(t *testing.T) {
 	}
 	_, err := Call(cfg)
 	if err == nil {
-		t.Fatal("expected error when components is empty")
+		t.Fatal("expected error when both sbom_id and components are empty")
+	}
+}
+
+func TestCall_SuccessWithSBOMIDOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in map[string]interface{}
+		_ = json.Unmarshal(body, &in)
+		if in["sbom_id"] != "sbom-123" {
+			t.Fatalf("sbom_id = %v", in["sbom_id"])
+		}
+		if _, ok := in["metadata"]; ok {
+			t.Fatalf("did not expect metadata in request body: %v", in)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"answer": "ok"})
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		BaseURL:   server.URL,
+		Token:     "test-token",
+		Query:     "recommend",
+		SBOMID:    "sbom-123",
+		PollDelay: time.Millisecond,
+		MaxPolls:  1,
+		Timeout:   5 * time.Second,
+	}
+	if _, err := Call(cfg); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+}
+
+func TestCall_InitialGUIDIncludesGuidAndSBOMID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in map[string]interface{}
+		_ = json.Unmarshal(body, &in)
+		if in["guid"] != "guid-123" {
+			t.Fatalf("guid = %v", in["guid"])
+		}
+		if in["sbom_id"] != "sbom-123" {
+			t.Fatalf("sbom_id = %v", in["sbom_id"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"answer": "ok"})
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		BaseURL:    server.URL,
+		Token:      "test-token",
+		Query:      "recommend",
+		SBOMID:     "sbom-123",
+		InitialGUID:"guid-123",
+		PollDelay:  time.Millisecond,
+		MaxPolls:   1,
+		Timeout:    5 * time.Second,
+	}
+	if _, err := Call(cfg); err != nil {
+		t.Fatalf("Call: %v", err)
 	}
 }
 

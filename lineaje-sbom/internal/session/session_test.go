@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,6 +33,47 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if len(loaded.Components) != len(s.Components) || (len(s.Components) > 0 && loaded.Components[0] != s.Components[0]) {
 		t.Errorf("loaded.Components = %v, want %v", loaded.Components, s.Components)
+	}
+}
+
+func TestSaveAndLoad_WithUploadPayload(t *testing.T) {
+	dir := t.TempDir()
+	s := Session{
+		GUID:          "upload-session-123",
+		SBOMID:        "SPDXRef-DOCUMENT-example",
+		CreatedAt:     "2026-03-02T17:37:05Z",
+		UploadPayload: json.RawMessage(`{"message":"SBOMJob updated","result":{"sbom_id":"SPDXRef-DOCUMENT-example"}}`),
+	}
+
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	path := filepath.Join(dir, s.GUID+".json")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.UploadPayload == nil {
+		t.Fatal("UploadPayload should be present")
+	}
+	if loaded.SBOMID != "SPDXRef-DOCUMENT-example" {
+		t.Fatalf("SBOMID = %v", loaded.SBOMID)
+	}
+	var payload struct {
+		Message string `json:"message"`
+		Result  struct {
+			SBOMID string `json:"sbom_id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(loaded.UploadPayload, &payload); err != nil {
+		t.Fatalf("unmarshal UploadPayload: %v", err)
+	}
+	if payload.Message != "SBOMJob updated" {
+		t.Fatalf("UploadPayload.message = %v", payload.Message)
+	}
+	if payload.Result.SBOMID != "SPDXRef-DOCUMENT-example" {
+		t.Fatalf("UploadPayload.result.sbom_id = %v", payload.Result.SBOMID)
 	}
 }
 
@@ -73,6 +115,18 @@ func TestSaveCreatesDir(t *testing.T) {
 	path := filepath.Join(dir, s.GUID+".json")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("session file should exist after MkdirAll: %v", err)
+	}
+}
+
+func TestSaveUsesSessionKeyAsFilename(t *testing.T) {
+	dir := t.TempDir()
+	s := Session{SessionKey: "session-file-1", GUID: "poll-guid-1", SBOMID: "sbom-1"}
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	path := filepath.Join(dir, "session-file-1.json")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected session file at session key path: %v", err)
 	}
 }
 
