@@ -61,6 +61,34 @@ func TestHandleAutoRelease_NoToken(t *testing.T) {
 	}
 }
 
+func TestHandleAutoRelease_NoSuccessfulVersions_NoRelease(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	releaseConfig := &config.ReleaseConfig{
+		AutoRelease:      true,
+		GitHubRepository: "test-owner/test-repo",
+	}
+
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	stdout := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	stderr := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	err := handleAggregatedAutoRelease(
+		"nodejs",
+		nil, // no new runtime downloads for this run
+		"/tmp",
+		releaseConfig,
+		db,
+		stdout,
+		stderr,
+	)
+	if err != nil {
+		t.Fatalf("handleAggregatedAutoRelease() error = %v, want nil", err)
+	}
+}
+
 // TestHandleAutoRelease_WithMockToken tests the success path with a mock setup.
 func TestHandleAutoRelease_WithMockToken(t *testing.T) {
 	// Set a test token (t.Setenv automatically cleans up after test)

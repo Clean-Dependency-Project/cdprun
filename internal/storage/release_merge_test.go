@@ -187,3 +187,45 @@ func TestDB_AppendOrMergePlatformArtifact_PreservesCommonFiles(t *testing.T) {
 	}
 }
 
+func TestDB_AppendOrMergePlatformArtifact_AggregatedReleaseVersion(t *testing.T) {
+	db := newTestDB(t)
+
+	release := &Release{
+		Runtime:     "nodejs",
+		Version:     "22.22.0,20.20.0",
+		SemverMajor: 22,
+		SemverMinor: 22,
+		SemverPatch: 0,
+		ReleaseTag:  "nodejs-multi-agg",
+		ReleaseURL:  "https://example.com/release",
+		Artifacts:   `{"platforms":[],"common_files":[],"metadata":{}}`,
+		CreatedAt:   time.Now(),
+	}
+	if err := db.CreateRelease(release); err != nil {
+		t.Fatalf("CreateRelease() error: %v", err)
+	}
+
+	err := db.AppendOrMergePlatformArtifact("nodejs", "22.22.0", PlatformArtifact{
+		Platform:     "linux-rpm-x64",
+		PlatformOS:   "linux",
+		PlatformArch: "x64",
+		Binary: &ArtifactFile{
+			Filename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
+			Size:     1000,
+			SHA256:   "rpm-sha",
+			URL:      "https://example.com/pkg.rpm",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AppendOrMergePlatformArtifact() error: %v", err)
+	}
+
+	gotRelease, err := db.GetRelease("nodejs", "22.22.0")
+	if err != nil {
+		t.Fatalf("GetRelease() error: %v", err)
+	}
+	if gotRelease.Version != "22.22.0,20.20.0" {
+		t.Fatalf("GetRelease().Version = %q, want aggregated version", gotRelease.Version)
+	}
+}
+

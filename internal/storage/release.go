@@ -41,6 +41,28 @@ func (d *DB) GetRelease(runtime, version string) (*Release, error) {
 		return nil, fmt.Errorf("version cannot be empty")
 	}
 
+	release, err := d.getReleaseByExactVersion(runtime, version)
+	if err == nil {
+		return release, nil
+	}
+	if !errors.Is(err, ErrReleaseNotFound) {
+		return nil, err
+	}
+
+	var candidates []Release
+	if err := d.db.Where("runtime = ?", runtime).Order("created_at DESC").Find(&candidates).Error; err != nil {
+		return nil, fmt.Errorf("failed to get runtime releases: %w", err)
+	}
+	for i := range candidates {
+		if releaseVersionContains(candidates[i].Version, version) {
+			return &candidates[i], nil
+		}
+	}
+
+	return nil, ErrReleaseNotFound
+}
+
+func (d *DB) getReleaseByExactVersion(runtime, version string) (*Release, error) {
 	var release Release
 	if err := d.db.Where("runtime = ? AND version = ?", runtime, version).First(&release).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -48,8 +70,20 @@ func (d *DB) GetRelease(runtime, version string) (*Release, error) {
 		}
 		return nil, fmt.Errorf("failed to get release: %w", err)
 	}
-
 	return &release, nil
+}
+
+func releaseVersionContains(storedVersion, queryVersion string) bool {
+	query := strings.TrimSpace(queryVersion)
+	if query == "" {
+		return false
+	}
+	for _, part := range strings.Split(storedVersion, ",") {
+		if strings.TrimSpace(part) == query {
+			return true
+		}
+	}
+	return false
 }
 
 // GetReleaseByTag retrieves a release by its unique release tag.
