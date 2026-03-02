@@ -524,6 +524,31 @@ func packagePromote(c *cli.Context) error {
 		return err
 	}
 
+	releaseTagsByRuntime := make(map[string]string)
+	for _, target := range manifest.Targets {
+		runtimeName := strings.TrimSpace(target.Runtime)
+		version := strings.TrimSpace(target.Version)
+		if runtimeName == "" || version == "" {
+			continue
+		}
+		if _, exists := releaseTagsByRuntime[runtimeName]; exists {
+			continue
+		}
+		release, getErr := db.GetRelease(runtimeName, version)
+		if getErr != nil {
+			stderr.Warn("failed to resolve release tag for evidence upload", "runtime", runtimeName, "version", version, "error", getErr)
+			continue
+		}
+		tag := strings.TrimSpace(release.ReleaseTag)
+		if tag != "" {
+			releaseTagsByRuntime[runtimeName] = tag
+		}
+	}
+	if err := UploadPromotionEvidenceFiles(uploader, releaseTagsByRuntime, testResultsPath); err != nil {
+		stderr.Error("failed to upload promotion evidence files", "error", err)
+		return err
+	}
+
 	stdout.Info("package promotion completed",
 		"eligible_entries", summary.EligibleEntries,
 		"promoted_entries", summary.PromotedEntries)

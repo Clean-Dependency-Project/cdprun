@@ -89,8 +89,8 @@ type Store interface {
 	UpsertPackageRecord(record *storage.PackageRecord) error
 }
 
-// ReleaseAssetUploader uploads package assets to an existing GitHub release.
-// Implementations should return a direct, downloadable URL for the uploaded asset.
+// ReleaseAssetUploader uploads package assets to an existing release and
+// returns the asset download URL.
 type ReleaseAssetUploader interface {
 	UploadPackageAsset(runtime, releaseTag, packagePath, uploadFilename string) (string, error)
 }
@@ -302,7 +302,6 @@ func withResolvedPackageURL(db Store, uploader ReleaseAssetUploader, target Targ
 			return result, nil
 		}
 	}
-
 	if uploader == nil {
 		return TestResult{}, fmt.Errorf("uploaded release URL not found for package filename %q and uploader is not configured", filename)
 	}

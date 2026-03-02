@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
@@ -24,8 +25,8 @@ func PromoteTestedPackagesFromFiles(
 	return PromoteTestedPackagesFromFilesWithUploader(db, manifestPath, testResultsPath, nil)
 }
 
-// PromoteTestedPackagesFromFilesWithUploader promotes tested package entries
-// and optionally uploads package assets when release URLs are missing.
+// PromoteTestedPackagesFromFilesWithUploader promotes tested package entries and
+// optionally uploads package assets to releases when URLs are missing.
 func PromoteTestedPackagesFromFilesWithUploader(
 	db promotion.Store,
 	manifestPath string,
@@ -65,6 +66,7 @@ type releaseAssetClient interface {
 	GetRelease(tag string) (*github.RepositoryRelease, error)
 	UploadAsset(releaseID int64, filePath string) (*github.ReleaseAsset, error)
 	GetAssetDownloadURL(asset *github.ReleaseAsset) string
+	FindReleaseAssetDownloadURL(releaseID int64, filename string) (string, error)
 }
 
 func (u *runtimeReleaseUploader) UploadPackageAsset(runtime, releaseTag, packagePath, _ string) (string, error) {
@@ -76,15 +78,29 @@ func (u *runtimeReleaseUploader) UploadPackageAsset(runtime, releaseTag, package
 	if err != nil {
 		return "", fmt.Errorf("get release %q: %w", releaseTag, err)
 	}
+
 	asset, err := client.UploadAsset(release.GetID(), strings.TrimSpace(packagePath))
-	if err != nil {
-		return "", fmt.Errorf("upload asset %q: %w", packagePath, err)
+	if err == nil {
+		url := strings.TrimSpace(client.GetAssetDownloadURL(asset))
+		if url == "" {
+			return "", fmt.Errorf("uploaded asset has empty download URL")
+		}
+		return url, nil
 	}
-	url := strings.TrimSpace(client.GetAssetDownloadURL(asset))
-	if url == "" {
-		return "", fmt.Errorf("uploaded asset has empty download URL")
+
+	// Idempotent retry path: if the asset already exists on GitHub, reuse it.
+	if strings.Contains(strings.ToLower(err.Error()), "already_exists") {
+		filename := filepath.Base(strings.TrimSpace(packagePath))
+		existingURL, lookupErr := client.FindReleaseAssetDownloadURL(release.GetID(), filename)
+		if lookupErr != nil {
+			return "", fmt.Errorf("lookup existing asset %q after already_exists: %w", filename, lookupErr)
+		}
+		if strings.TrimSpace(existingURL) == "" {
+			return "", fmt.Errorf("asset %q already exists but download URL was not found", filename)
+		}
+		return strings.TrimSpace(existingURL), nil
 	}
-	return url, nil
+	return "", fmt.Errorf("upload asset %q: %w", packagePath, err)
 }
 
 func BuildPromotionUploader(configPath, token string, manifest PackageManifest) (promotion.ReleaseAssetUploader, error) {
@@ -122,6 +138,71 @@ func BuildPromotionUploader(configPath, token string, manifest PackageManifest) 
 		clientsByRuntime[runtimeName] = client
 	}
 	return &runtimeReleaseUploader{clientsByRuntime: clientsByRuntime}, nil
+}
+
+func UploadPromotionEvidenceFiles(
+	uploader promotion.ReleaseAssetUploader,
+	releaseTagsByRuntime map[string]string,
+	testResultsPath string,
+) error {
+	if uploader == nil {
+		return nil
+	}
+	if len(releaseTagsByRuntime) == 0 {
+		return nil
+	}
+
+	artifactsDir := filepath.Dir(strings.TrimSpace(testResultsPath))
+	evidenceFiles := []string{
+		strings.TrimSpace(testResultsPath),
+		filepath.Join(artifactsDir, "package-build-results.json"),
+		filepath.Join(artifactsDir, "package-manifest.built.json"),
+		filepath.Join(artifactsDir, "package-manifest.tested.json"),
+	}
+	seen := make(map[string]struct{})
+	for _, runtimeName := range sortedRuntimeKeys(releaseTagsByRuntime) {
+		releaseTag := releaseTagsByRuntime[runtimeName]
+		for _, evidencePath := range evidenceFiles {
+			cleanPath := strings.TrimSpace(evidencePath)
+			if cleanPath == "" {
+				continue
+			}
+			if _, exists := seen[cleanPath+"|"+runtimeName]; exists {
+				continue
+			}
+			seen[cleanPath+"|"+runtimeName] = struct{}{}
+			info, err := os.Stat(cleanPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return fmt.Errorf("stat evidence file %q: %w", cleanPath, err)
+			}
+			if info.IsDir() || info.Size() == 0 {
+				continue
+			}
+			if _, err := uploader.UploadPackageAsset(runtimeName, releaseTag, cleanPath, filepath.Base(cleanPath)); err != nil {
+				return fmt.Errorf("upload promotion evidence %q for %s: %w", cleanPath, runtimeName, err)
+			}
+		}
+	}
+	return nil
+}
+
+func sortedRuntimeKeys(byRuntime map[string]string) []string {
+	keys := make([]string, 0, len(byRuntime))
+	for runtimeName := range byRuntime {
+		keys = append(keys, runtimeName)
+	}
+	// Keep deterministic upload order for repeatability in logs/tests.
+	for i := 0; i < len(keys)-1; i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[j] < keys[i] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	return keys
 }
 
 // ReadPackageManifest reads a package manifest JSON from disk.

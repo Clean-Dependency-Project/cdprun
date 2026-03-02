@@ -102,6 +102,40 @@ func (c *Client) GetRelease(tag string) (*github.RepositoryRelease, error) {
 	return release, nil
 }
 
+// FindReleaseAssetDownloadURL looks up an asset by filename for a given release.
+// Returns empty string when the asset does not exist.
+func (c *Client) FindReleaseAssetDownloadURL(releaseID int64, filename string) (string, error) {
+	if releaseID == 0 {
+		return "", fmt.Errorf("release ID cannot be zero")
+	}
+	name := strings.TrimSpace(filename)
+	if name == "" {
+		return "", fmt.Errorf("filename cannot be empty")
+	}
+	if c.client == nil || c.owner == "" || c.repo == "" {
+		return "", fmt.Errorf("client not initialized: use NewClient to create instances")
+	}
+
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		assets, resp, err := c.client.Repositories.ListReleaseAssets(c.ctx, c.owner, c.repo, releaseID, opts)
+		if err != nil {
+			return "", fmt.Errorf("failed to list release assets: %w", err)
+		}
+		for _, asset := range assets {
+			if strings.TrimSpace(asset.GetName()) != name {
+				continue
+			}
+			return strings.TrimSpace(asset.GetBrowserDownloadURL()), nil
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return "", nil
+}
+
 // UploadAsset uploads a file as a release asset.
 // The file will be read from the provided path and uploaded to the specified release.
 // Returns the created asset with its download URL.
