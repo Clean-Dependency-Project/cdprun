@@ -19,6 +19,8 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
+	"github.com/clean-dependency-project/cdprun/internal/packageexec"
+	"github.com/clean-dependency-project/cdprun/internal/promotion"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 	"github.com/google/go-github/v57/github"
@@ -74,41 +76,56 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		"runtime", runtimeName,
 		"versions", versions)
 
-	// Collect all artifact files BEFORE creating the release
-	// This allows us to skip release creation if there are no artifacts
-	allArtifactFiles := make([]string, 0)
-	seenArtifactPath := make(map[string]struct{})
-	appendUniqueArtifact := func(paths ...string) {
+	// Collect all runtime artifacts BEFORE creating the release.
+	// We skip release creation entirely when no runtime artifacts were downloaded.
+	runtimeArtifactFiles := make([]string, 0)
+	packageArtifactFiles := make([]string, 0)
+	seenRuntimeArtifactPath := make(map[string]struct{})
+	seenPackageArtifactPath := make(map[string]struct{})
+	appendUniqueArtifact := func(dst *[]string, seen map[string]struct{}, paths ...string) {
 		for _, p := range paths {
 			clean := strings.TrimSpace(p)
 			if clean == "" {
 				continue
 			}
-			if _, ok := seenArtifactPath[clean]; ok {
+			if _, ok := seen[clean]; ok {
 				continue
 			}
-			seenArtifactPath[clean] = struct{}{}
-			allArtifactFiles = append(allArtifactFiles, clean)
+			seen[clean] = struct{}{}
+			*dst = append(*dst, clean)
 		}
 	}
 	for _, version := range versions {
-		artifactFiles, err := rm.collectArtifactFiles(outputDir, runtimeName, version)
+		runtimeFiles, err := rm.collectRuntimeArtifactFiles(outputDir, runtimeName, version)
 		if err != nil {
 			rm.stderr.Warn("failed to collect artifact files for version", "version", version, "error", err)
 			continue
 		}
-		appendUniqueArtifact(artifactFiles...)
+		appendUniqueArtifact(&runtimeArtifactFiles, seenRuntimeArtifactPath, runtimeFiles...)
+		packageFiles, err := rm.collectPackageArtifacts(outputDir, runtimeName, version)
+		if err != nil {
+			rm.stderr.Warn("failed to collect package artifacts for version", "version", version, "error", err)
+			continue
+		}
+		appendUniqueArtifact(&packageArtifactFiles, seenPackageArtifactPath, packageFiles...)
 	}
 
-	// Skip release creation if there are no artifacts to upload
-	if len(allArtifactFiles) == 0 {
-		rm.stdout.Info("skipping release creation - no artifacts to upload",
+	// Skip release creation when no runtime artifacts were collected.
+	if len(runtimeArtifactFiles) == 0 {
+		rm.stdout.Info("skipping release creation - no runtime artifacts to upload",
 			"runtime", runtimeName,
 			"versions", versions)
 		return nil, nil
 	}
 
-	rm.stdout.Info("collected artifacts for upload", "count", len(allArtifactFiles))
+	// Include package artifacts only when runtime artifacts exist.
+	allArtifactFiles := make([]string, 0, len(runtimeArtifactFiles)+len(packageArtifactFiles)+1)
+	allArtifactFiles = append(allArtifactFiles, runtimeArtifactFiles...)
+	allArtifactFiles = append(allArtifactFiles, packageArtifactFiles...)
+	rm.stdout.Info("collected artifacts for upload",
+		"runtime_artifact_count", len(runtimeArtifactFiles),
+		"package_artifact_count", len(packageArtifactFiles),
+		"count", len(allArtifactFiles))
 
 	// Use first version for semver (or could use latest)
 	// For aggregated releases, semver is less meaningful
@@ -135,7 +152,7 @@ func (rm *ReleaseManager) CreateAggregatedRelease(
 		rm.stderr.Warn("failed to create scripts zip", "error", err)
 	} else if p != "" {
 		scriptsZipPath = p
-		appendUniqueArtifact(scriptsZipPath)
+		appendUniqueArtifact(&allArtifactFiles, make(map[string]struct{}), scriptsZipPath)
 		// cleanup after upload/buildArtifactsJSON completes
 		defer func() {
 			_ = os.Remove(scriptsZipPath)
@@ -201,12 +218,12 @@ func (rm *ReleaseManager) createGitHubRelease(tag, name, body string, draft bool
 	return ghRelease, releaseURL, nil
 }
 
-// collectArtifactFiles scans the output directory for all artifact files related to this release.
+// collectRuntimeArtifactFiles scans the output directory for runtime files related to this release.
 // This includes binaries, audit.json files, signatures (.sig/.asc), and certificates (.cert).
 // Empty (0-byte) files are skipped as they indicate failed downloads.
 // For security-only releases where the binary version differs from the recorded version,
 // this function uses the database to find the actual filenames.
-func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version string) ([]string, error) {
+func (rm *ReleaseManager) collectRuntimeArtifactFiles(outputDir, runtimeName, version string) ([]string, error) {
 	files := make([]string, 0)
 	seen := make(map[string]struct{})
 	appendFile := func(path string, info os.FileInfo) {
@@ -267,14 +284,23 @@ func (rm *ReleaseManager) collectArtifactFiles(outputDir, runtimeName, version s
 		return nil, err
 	}
 
-	if err := rm.collectPackageArtifacts(outputDir, runtimeName, version, appendFile); err != nil {
-		return nil, err
-	}
-
 	return files, nil
 }
 
-func (rm *ReleaseManager) collectPackageArtifacts(outputDir, runtimeName, version string, appendFile func(path string, info os.FileInfo)) error {
+func (rm *ReleaseManager) collectPackageArtifacts(outputDir, runtimeName, version string) ([]string, error) {
+	files := make([]string, 0)
+	seen := make(map[string]struct{})
+	appendFile := func(path string, info os.FileInfo) {
+		if info == nil || info.IsDir() || info.Size() == 0 {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		files = append(files, path)
+	}
+
 	packageEvidenceFiles := map[string]struct{}{
 		"package-build-results.json":   {},
 		"package-test-results.json":    {},
@@ -283,50 +309,106 @@ func (rm *ReleaseManager) collectPackageArtifacts(outputDir, runtimeName, versio
 		"package-promote-summary.json": {},
 	}
 
-	includePackageBinary := func(filename string) bool {
-		lower := strings.ToLower(filename)
-		if strings.HasSuffix(lower, ".rpm") ||
-			strings.HasSuffix(lower, ".apk") ||
-			strings.HasSuffix(lower, ".tgz") ||
-			strings.HasSuffix(lower, ".tar.gz") {
-			return strings.Contains(lower, strings.ToLower(runtimeName)) || strings.Contains(lower, strings.ToLower(version))
-		}
-		return false
-	}
-
 	baseDir := filepath.Dir(outputDir)
-	for _, root := range []string{filepath.Join(baseDir, "packages"), filepath.Join(baseDir, "artifacts")} {
-		rootInfo, err := os.Stat(root)
+	artifactsDir := filepath.Join(baseDir, "artifacts")
+
+	for evidenceFilename := range packageEvidenceFiles {
+		evidencePath := filepath.Join(artifactsDir, evidenceFilename)
+		info, err := os.Stat(evidencePath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return fmt.Errorf("stat %s: %w", root, err)
+			return nil, fmt.Errorf("stat %s: %w", evidencePath, err)
 		}
-		if !rootInfo.IsDir() {
+		appendFile(evidencePath, info)
+	}
+
+	candidatePackagePaths := make(map[string]struct{})
+	buildResultsPath := filepath.Join(artifactsDir, "package-build-results.json")
+	buildResults, err := readPackageBuildResults(buildResultsPath)
+	if err != nil {
+		rm.stderr.Warn("failed to parse package build results", "path", buildResultsPath, "error", err)
+	}
+	for _, record := range buildResults.Results {
+		if !record.Success {
 			continue
 		}
-		if err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if info.IsDir() {
-				return nil
-			}
-			base := filepath.Base(path)
-			if _, ok := packageEvidenceFiles[base]; ok {
-				appendFile(path, info)
-				return nil
-			}
-			if includePackageBinary(base) {
-				appendFile(path, info)
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("walk %s: %w", root, err)
+		if record.Target.Runtime != runtimeName || record.Target.Version != version {
+			continue
+		}
+		packagePath := strings.TrimSpace(record.Build.PackagePath)
+		if packagePath != "" {
+			candidatePackagePaths[packagePath] = struct{}{}
 		}
 	}
-	return nil
+
+	testResultsPath := filepath.Join(artifactsDir, "package-test-results.json")
+	testResults, err := readPackageTestResults(testResultsPath)
+	if err != nil {
+		rm.stderr.Warn("failed to parse package test results", "path", testResultsPath, "error", err)
+	}
+	for _, record := range testResults.Results {
+		if !record.Passed {
+			continue
+		}
+		if record.Runtime != runtimeName || record.Version != version {
+			continue
+		}
+		packagePath := strings.TrimSpace(record.PackagePath)
+		if packagePath != "" {
+			candidatePackagePaths[packagePath] = struct{}{}
+		}
+	}
+
+	for relPath := range candidatePackagePaths {
+		fullPath := relPath
+		if !filepath.IsAbs(fullPath) {
+			fullPath = filepath.Join(baseDir, relPath)
+		}
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("stat %s: %w", fullPath, err)
+		}
+		if packageArtifactFilename(filepath.Base(fullPath)) {
+			appendFile(fullPath, info)
+		}
+	}
+
+	return files, nil
+}
+
+func readPackageBuildResults(path string) (packageexec.BuildResultsFile, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return packageexec.BuildResultsFile{}, nil
+		}
+		return packageexec.BuildResultsFile{}, err
+	}
+	var results packageexec.BuildResultsFile
+	if err := json.Unmarshal(content, &results); err != nil {
+		return packageexec.BuildResultsFile{}, err
+	}
+	return results, nil
+}
+
+func readPackageTestResults(path string) (promotion.TestResultsFile, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return promotion.TestResultsFile{}, nil
+		}
+		return promotion.TestResultsFile{}, err
+	}
+	var results promotion.TestResultsFile
+	if err := json.Unmarshal(content, &results); err != nil {
+		return promotion.TestResultsFile{}, err
+	}
+	return results, nil
 }
 
 // createScriptsZip creates a scripts zip from the repo's scripts/ directory.

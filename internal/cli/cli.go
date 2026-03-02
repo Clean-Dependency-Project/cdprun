@@ -293,7 +293,11 @@ func packageRPM(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("open db: %w", err)
 		}
-		defer func() { _ = db.Close() }()
+		defer func() {
+			if closeErr := db.Close(); closeErr != nil {
+				stderr.Error("close db", "error", closeErr)
+			}
+		}()
 
 		platform := c.String("input-platform")
 		arch := c.String("input-arch")
@@ -395,7 +399,11 @@ func packageAPK(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("open db: %w", err)
 		}
-		defer func() { _ = db.Close() }()
+		defer func() {
+			if closeErr := db.Close(); closeErr != nil {
+				stderr.Error("close db", "error", closeErr)
+			}
+		}()
 
 		platform := c.String("input-platform")
 		arch := c.String("input-arch")
@@ -480,7 +488,11 @@ func packagePromote(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			stderr.Error("close db", "error", closeErr)
+		}
+	}()
 
 	stdout.Info("starting package promotion",
 		"manifest", manifestPath,
@@ -954,10 +966,9 @@ func downloadSingleRuntime(c *cli.Context, manager *runtime.Manager, cfg *config
 			})
 		}
 
-		// Include version in release if:
-		// 1. Downloads succeeded (successCount > 0), OR
-		// 2. All files were already downloaded (len(results) == 0 means skipped as "already downloaded")
-		if successCount > 0 || len(results) == 0 {
+		// Include version in release only when this run produced at least
+		// one successful runtime download.
+		if successCount > 0 {
 			totalSuccess++
 			// Collect for aggregated release
 			successfulVersions = append(successfulVersions, versionDownload{

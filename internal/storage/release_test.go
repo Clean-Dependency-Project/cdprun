@@ -136,6 +136,50 @@ func TestDB_GetRelease(t *testing.T) {
 	}
 }
 
+func TestDB_GetRelease_AggregatedVersionMatch(t *testing.T) {
+	db, err := InitDB(Config{DatabasePath: ":memory:", LogLevel: "silent"})
+	if err != nil {
+		t.Fatalf("InitDB() error: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	aggregated := &Release{
+		Runtime:     "nodejs",
+		Version:     "22.22.0,20.20.0",
+		SemverMajor: 22,
+		SemverMinor: 22,
+		SemverPatch: 0,
+		ReleaseTag:  "nodejs-multi-20260301T042800Z",
+		ReleaseURL:  "https://github.com/owner/repo/releases/tag/nodejs-multi-20260301T042800Z",
+		Artifacts:   `{"platforms":[]}`,
+		CreatedAt:   time.Now(),
+	}
+	if err := db.CreateRelease(aggregated); err != nil {
+		t.Fatalf("CreateRelease() error: %v", err)
+	}
+
+	got22, err := db.GetRelease("nodejs", "22.22.0")
+	if err != nil {
+		t.Fatalf("GetRelease(nodejs,22.22.0) error: %v", err)
+	}
+	if got22.Version != "22.22.0,20.20.0" {
+		t.Fatalf("GetRelease(nodejs,22.22.0) version = %q, want aggregated version", got22.Version)
+	}
+
+	got20, err := db.GetRelease("nodejs", "20.20.0")
+	if err != nil {
+		t.Fatalf("GetRelease(nodejs,20.20.0) error: %v", err)
+	}
+	if got20.Version != "22.22.0,20.20.0" {
+		t.Fatalf("GetRelease(nodejs,20.20.0) version = %q, want aggregated version", got20.Version)
+	}
+
+	_, err = db.GetRelease("nodejs", "18.99.0")
+	if !errors.Is(err, ErrReleaseNotFound) {
+		t.Fatalf("GetRelease(nodejs,18.99.0) error = %v, want ErrReleaseNotFound", err)
+	}
+}
+
 func TestDB_GetReleaseByTag(t *testing.T) {
 	db, err := InitDB(Config{DatabasePath: ":memory:", LogLevel: "silent"})
 	if err != nil {

@@ -128,7 +128,7 @@ func TestNewReleaseManager(t *testing.T) {
 	}
 }
 
-func TestCollectArtifactFiles(t *testing.T) {
+func TestCollectRuntimeAndPackageArtifactFiles(t *testing.T) {
 	stdout := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	stderr := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
@@ -169,7 +169,10 @@ func TestCollectArtifactFiles(t *testing.T) {
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		t.Fatalf("Failed to create artifacts dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(artifactsDir, "package-test-results.json"), []byte(`{"run_id":"r1","results":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(artifactsDir, "package-build-results.json"), []byte(`{"run_id":"r1","results":[{"target":{"runtime":"nodejs","version":"22.15.0"},"build":{"package_path":"packages/OSPO-nodejs-22.15.0-1.x86_64.rpm"},"success":true}]}`), 0o644); err != nil {
+		t.Fatalf("Failed to create package build results file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactsDir, "package-test-results.json"), []byte(`{"run_id":"r1","results":[{"runtime":"nodejs","version":"22.15.0","passed":true,"package_path":"packages/OSPO-nodejs-22.15.0-1.x86_64.rpm"}]}`), 0o644); err != nil {
 		t.Fatalf("Failed to create package evidence file: %v", err)
 	}
 
@@ -180,18 +183,18 @@ func TestCollectArtifactFiles(t *testing.T) {
 		stderr: stderr,
 	}
 
-	files, err := rm.collectArtifactFiles(tempDir, "nodejs", "22.15.0")
+	runtimeFiles, err := rm.collectRuntimeArtifactFiles(tempDir, "nodejs", "22.15.0")
 	if err != nil {
-		t.Fatalf("collectArtifactFiles() error: %v", err)
+		t.Fatalf("collectRuntimeArtifactFiles() error: %v", err)
 	}
 
 	// Should collect files with version in name (6 files: 2 binaries + 2 audit.json + 2 sig/cert)
 	// Note: SHASUMS files don't contain version, so they won't be collected by this logic
 	// This is intentional - SHASUMS are per-version-family, not per exact version
 	expectedMinCount := 6
-	if len(files) < expectedMinCount {
-		t.Errorf("collectArtifactFiles() collected %d files, want at least %d", len(files), expectedMinCount)
-		t.Logf("Files collected: %v", files)
+	if len(runtimeFiles) < expectedMinCount {
+		t.Errorf("collectRuntimeArtifactFiles() collected %d files, want at least %d", len(runtimeFiles), expectedMinCount)
+		t.Logf("Files collected: %v", runtimeFiles)
 	}
 
 	// Verify all collected files are either:
@@ -205,7 +208,7 @@ func TestCollectArtifactFiles(t *testing.T) {
 		"package-manifest.tested.json": {},
 		"package-promote-summary.json": {},
 	}
-	for _, file := range files {
+	for _, file := range runtimeFiles {
 		filename := filepath.Base(file)
 		if strings.Contains(filename, "22.15.0") {
 			// This is a version-specific file - good
@@ -220,9 +223,14 @@ func TestCollectArtifactFiles(t *testing.T) {
 		}
 	}
 
+	packageFiles, err := rm.collectPackageArtifacts(tempDir, "nodejs", "22.15.0")
+	if err != nil {
+		t.Fatalf("collectPackageArtifacts() error: %v", err)
+	}
+
 	foundPackageRPM := false
 	foundPackageEvidence := false
-	for _, file := range files {
+	for _, file := range packageFiles {
 		base := filepath.Base(file)
 		if base == "OSPO-nodejs-22.15.0-1.x86_64.rpm" {
 			foundPackageRPM = true
@@ -232,14 +240,14 @@ func TestCollectArtifactFiles(t *testing.T) {
 		}
 	}
 	if !foundPackageRPM {
-		t.Error("collectArtifactFiles() did not include package rpm")
+		t.Error("collectPackageArtifacts() did not include package rpm")
 	}
 	if !foundPackageEvidence {
-		t.Error("collectArtifactFiles() did not include package evidence JSON")
+		t.Error("collectPackageArtifacts() did not include package evidence JSON")
 	}
 }
 
-func TestCollectArtifactFiles_EmptyDir(t *testing.T) {
+func TestCollectRuntimeAndPackageArtifactFiles_EmptyDir(t *testing.T) {
 	stdout := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	stderr := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
@@ -252,13 +260,78 @@ func TestCollectArtifactFiles_EmptyDir(t *testing.T) {
 		stderr: stderr,
 	}
 
-	files, err := rm.collectArtifactFiles(tempDir, "nodejs", "22.15.0")
+	runtimeFiles, err := rm.collectRuntimeArtifactFiles(tempDir, "nodejs", "22.15.0")
 	if err != nil {
-		t.Fatalf("collectArtifactFiles() error: %v", err)
+		t.Fatalf("collectRuntimeArtifactFiles() error: %v", err)
 	}
 
-	if len(files) != 0 {
-		t.Errorf("collectArtifactFiles() collected %d files from empty dir, want 0", len(files))
+	if len(runtimeFiles) != 0 {
+		t.Errorf("collectRuntimeArtifactFiles() collected %d files from empty dir, want 0", len(runtimeFiles))
+	}
+
+	packageFiles, err := rm.collectPackageArtifacts(tempDir, "nodejs", "22.15.0")
+	if err != nil {
+		t.Fatalf("collectPackageArtifacts() error: %v", err)
+	}
+	if len(packageFiles) != 0 {
+		t.Errorf("collectPackageArtifacts() collected %d files from empty dir, want 0", len(packageFiles))
+	}
+}
+
+func TestCreateAggregatedRelease_SkipsWhenOnlyPackageArtifacts(t *testing.T) {
+	tempRoot := t.TempDir()
+	outputDir := filepath.Join(tempRoot, "downloads")
+	artifactsDir := filepath.Join(tempRoot, "artifacts")
+	packagesDir := filepath.Join(tempRoot, "packages")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir downloads: %v", err)
+	}
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	if err := os.MkdirAll(packagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir packages: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(packagesDir, "OSPO-nodejs-22.15.0-1.x86_64.rpm"), []byte("rpm"), 0o644); err != nil {
+		t.Fatalf("write package file: %v", err)
+	}
+	buildResults := `{"run_id":"run-1","results":[{"target":{"runtime":"nodejs","version":"22.15.0"},"build":{"package_path":"packages/OSPO-nodejs-22.15.0-1.x86_64.rpm"},"success":true}]}`
+	if err := os.WriteFile(filepath.Join(artifactsDir, "package-build-results.json"), []byte(buildResults), 0o644); err != nil {
+		t.Fatalf("write package-build-results.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactsDir, "package-test-results.json"), []byte(`{"run_id":"run-1","results":[]}`), 0o644); err != nil {
+		t.Fatalf("write package-test-results.json: %v", err)
+	}
+
+	createReleaseCalls := 0
+	rm := &ReleaseManager{
+		db: &mockDatabaseStore{},
+		github: &mockGitHubReleaser{
+			createReleaseFn: func(tag, name, body string, draft bool) (*github.RepositoryRelease, error) {
+				createReleaseCalls++
+				return &github.RepositoryRelease{}, nil
+			},
+		},
+		stdout: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		stderr: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	}
+
+	release, err := rm.CreateAggregatedRelease(
+		"nodejs",
+		[]string{"22.15.0"},
+		nil,
+		outputDir,
+		&config.ReleaseConfig{AutoRelease: true, GitHubRepository: "owner/repo"},
+	)
+	if err != nil {
+		t.Fatalf("CreateAggregatedRelease() error: %v", err)
+	}
+	if release != nil {
+		t.Fatalf("CreateAggregatedRelease() = %#v, want nil when only package artifacts are present", release)
+	}
+	if createReleaseCalls != 0 {
+		t.Fatalf("CreateAggregatedRelease() created GitHub release %d times, want 0", createReleaseCalls)
 	}
 }
 
