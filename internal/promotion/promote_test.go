@@ -287,38 +287,45 @@ func TestPromoteTestedPackages_UploadsPackageAssetWhenURLMissing(t *testing.T) {
 		t.Fatalf("seedRelease() error: %v", err)
 	}
 
-	targets := []Target{{
-		Runtime:       "nodejs",
-		Version:       "22.22.0",
-		Target:        "rpm",
-		InputPlatform: "linux",
-		InputArch:     "x64",
-		InputSHA256:   "in-sha-upload",
-		PackageName:   "OSPO-nodejs",
-		InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
-		Tested:        true,
-	}}
+	targets := []Target{
+		{
+			Runtime:       "nodejs",
+			Version:       "22.22.0",
+			Target:        "rpm",
+			InputPlatform: "linux",
+			InputArch:     "x64",
+			InputSHA256:   "in-sha-upload",
+			PackageName:   "OSPO-nodejs",
+			InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
+			Tested:        true,
+		},
+	}
 	results := TestResultsFile{
 		RunID: "run-1",
-		Results: []TestResult{{
-			Runtime:         "nodejs",
-			Version:         "22.22.0",
-			Target:          "rpm",
-			InputSHA256:     "in-sha-upload",
-			PackageName:     "OSPO-nodejs",
-			InstallPrefix:   "/export/apps/citools/OSPO-nodejs/22.22.0",
-			Passed:          true,
-			PackagePath:     "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
-			PackageFilename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
-			PackageSHA256:   "pkg-sha-upload",
-			PackageSize:     4096,
-		}},
+		Results: []TestResult{
+			{
+				Runtime:         "nodejs",
+				Version:         "22.22.0",
+				Target:          "rpm",
+				InputSHA256:     "in-sha-upload",
+				PackageName:     "OSPO-nodejs",
+				InstallPrefix:   "/export/apps/citools/OSPO-nodejs/22.22.0",
+				Passed:          true,
+				PackagePath:     "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
+				PackageFilename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
+				PackageSHA256:   "pkg-sha-upload",
+				PackageSize:     4096,
+			},
+		},
 	}
 
 	uploader := &mockReleaseAssetUploader{
 		uploadFn: func(runtime, releaseTag, packagePath, uploadFilename string) (string, error) {
 			if runtime != "nodejs" || releaseTag != "nodejs-v22.22.0-test" {
-				t.Fatalf("unexpected uploader context: runtime=%q releaseTag=%q", runtime, releaseTag)
+				t.Fatalf("unexpected upload context: runtime=%q tag=%q", runtime, releaseTag)
+			}
+			if packagePath != "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm" {
+				t.Fatalf("unexpected package path: %q", packagePath)
 			}
 			if uploadFilename != "OSPO-nodejs-22.22.0-1.x86_64.rpm" {
 				t.Fatalf("unexpected upload filename: %q", uploadFilename)
@@ -346,32 +353,36 @@ func TestPromoteTestedPackages_UploadFailureReturnsError(t *testing.T) {
 		t.Fatalf("seedRelease() error: %v", err)
 	}
 
-	targets := []Target{{
-		Runtime:       "nodejs",
-		Version:       "22.22.0",
-		Target:        "rpm",
-		InputPlatform: "linux",
-		InputArch:     "x64",
-		InputSHA256:   "in-sha-upload-fail",
-		PackageName:   "OSPO-nodejs",
-		InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
-		Tested:        true,
-	}}
+	targets := []Target{
+		{
+			Runtime:       "nodejs",
+			Version:       "22.22.0",
+			Target:        "rpm",
+			InputPlatform: "linux",
+			InputArch:     "x64",
+			InputSHA256:   "in-sha-upload-fail",
+			PackageName:   "OSPO-nodejs",
+			InstallPrefix: "/export/apps/citools/OSPO-nodejs/22.22.0",
+			Tested:        true,
+		},
+	}
 	results := TestResultsFile{
 		RunID: "run-1",
-		Results: []TestResult{{
-			Runtime:         "nodejs",
-			Version:         "22.22.0",
-			Target:          "rpm",
-			InputSHA256:     "in-sha-upload-fail",
-			PackageName:     "OSPO-nodejs",
-			InstallPrefix:   "/export/apps/citools/OSPO-nodejs/22.22.0",
-			Passed:          true,
-			PackagePath:     "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
-			PackageFilename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
-			PackageSHA256:   "pkg-sha-upload-fail",
-			PackageSize:     4096,
-		}},
+		Results: []TestResult{
+			{
+				Runtime:         "nodejs",
+				Version:         "22.22.0",
+				Target:          "rpm",
+				InputSHA256:     "in-sha-upload-fail",
+				PackageName:     "OSPO-nodejs",
+				InstallPrefix:   "/export/apps/citools/OSPO-nodejs/22.22.0",
+				Passed:          true,
+				PackagePath:     "packages/OSPO-nodejs-22.22.0-1.x86_64.rpm",
+				PackageFilename: "OSPO-nodejs-22.22.0-1.x86_64.rpm",
+				PackageSHA256:   "pkg-sha-upload-fail",
+				PackageSize:     5120,
+			},
+		},
 	}
 
 	uploader := &mockReleaseAssetUploader{
@@ -380,8 +391,12 @@ func TestPromoteTestedPackages_UploadFailureReturnsError(t *testing.T) {
 		},
 	}
 
-	if _, err := PromoteTestedPackages(db, uploader, "run-1", targets, results); err == nil {
-		t.Fatal("PromoteTestedPackages() error = nil, want non-nil")
+	summary, err := PromoteTestedPackages(db, uploader, "run-1", targets, results)
+	if err == nil {
+		t.Fatal("PromoteTestedPackages() error = nil, want error")
+	}
+	if summary.PromotedEntries != 0 {
+		t.Fatalf("promoted entries = %d, want 0", summary.PromotedEntries)
 	}
 }
 
