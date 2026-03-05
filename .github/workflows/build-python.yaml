@@ -1,4 +1,4 @@
-name: Build Python Package
+name: Build Python Package (Fallback Workflow)
 
 on:
   workflow_dispatch:
@@ -16,6 +16,11 @@ permissions:
 
 env:
   PYTHON_VERSION: ${{ inputs.python_version }}
+
+# NOTE:
+# Primary Python RPM packaging now runs through the shared pipeline in run.yaml
+# via `make run` / `package execute` / `package promote`.
+# This workflow remains as a manual fallback path.
 
 jobs:
   # =============================================================================

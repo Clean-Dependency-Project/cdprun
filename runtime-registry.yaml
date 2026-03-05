@@ -14,7 +14,7 @@ config:
    docker_platform: "linux/amd64"
 runtimes:
   python:
-    enabled: false
+    enabled: true
     name: "Python"
     description: "High-level programming language"
     endoflife_product: "python"
@@ -62,8 +62,8 @@ runtimes:
       draft_release: false
       release_name_template: "Python Runtime Binaries - {version}"
     packaging:
-      enabled: false
-      targets: []
+      enabled: true
+      targets: ["rpm"]
       package_name_template: "OSPO-{runtime}"
       install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
       execution:

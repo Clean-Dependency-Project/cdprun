@@ -266,6 +266,55 @@ nodejs-rpm-test: nodejs-rpm-build
 nodejs-test: nodejs-rpm-test
 	@echo "Node.js RPM tests complete."
 
+# =============================================================================
+# Python Packaging Tests (Local Development)
+# Uses shared cdprun package execute build/test/promote flow.
+# =============================================================================
+
+python-rpm-build: build-only
+	@echo "Building Python $(PYTHON_VERSION) RPM via shared package execute flow..."
+	@test -n "$$GITHUB_TOKEN" || (echo "GITHUB_TOKEN is required for python-rpm-build (auto_release enabled for python download)" && exit 1)
+	@mkdir -p $(ARTIFACTS_DIR) $(DOWNLOADS_DIR) $(PACKAGES_DIR)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error download \
+		--runtime python --version "$(PYTHON_VERSION)" --exact \
+		--platform linux-x64 --output json --output-dir $(DOWNLOADS_DIR) > $(ARTIFACTS_DIR)/python-download-summary.json
+	@test -f "$(PACKAGE_MANIFEST_RESOLVED)" || (echo "missing resolved manifest: $(PACKAGE_MANIFEST_RESOLVED)" && exit 1)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+		--stage build \
+		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
+		--build-results $(PACKAGE_BUILD_RESULTS) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--built-manifest $(PACKAGE_MANIFEST_BUILT) \
+		--tested-manifest $(PACKAGE_MANIFEST_TESTED) \
+		--output json > $(ARTIFACTS_DIR)/python-package-execute-build-summary.json
+
+python-rpm-test: python-rpm-build
+	@echo "Testing Python $(PYTHON_VERSION) RPM via shared package execute flow..."
+	@test -f "$(PACKAGE_MANIFEST_BUILT)" || (echo "missing built manifest: $(PACKAGE_MANIFEST_BUILT)" && exit 1)
+	@test -f "$(PACKAGE_BUILD_RESULTS)" || (echo "missing build results: $(PACKAGE_BUILD_RESULTS)" && exit 1)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+		--stage test \
+		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
+		--build-results $(PACKAGE_BUILD_RESULTS) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--built-manifest $(PACKAGE_MANIFEST_BUILT) \
+		--tested-manifest $(PACKAGE_MANIFEST_TESTED) \
+		--output json > $(ARTIFACTS_DIR)/python-package-execute-test-summary.json
+
+python-rpm-promote: python-rpm-test
+	@echo "Promoting Python $(PYTHON_VERSION) package via shared promotion flow..."
+	@test -n "$$GITHUB_TOKEN" || (echo "GITHUB_TOKEN is required for python-rpm-promote (release asset upload)" && exit 1)
+	@test -f "$(PACKAGE_MANIFEST_TESTED)" || (echo "missing tested manifest: $(PACKAGE_MANIFEST_TESTED)" && exit 1)
+	@test -f "$(PACKAGE_TEST_RESULTS)" || (echo "missing test results: $(PACKAGE_TEST_RESULTS)" && exit 1)
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package promote \
+		--db ./downloads.db \
+		--manifest $(PACKAGE_MANIFEST_TESTED) \
+		--test-results $(PACKAGE_TEST_RESULTS) \
+		--output json > $(ARTIFACTS_DIR)/python-package-promote-summary.json
+
+python-test: python-rpm-test
+	@echo "Python RPM tests complete."
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto run-download run-package-build run-package-test run-package-promote nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test
+.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto run-download run-package-build run-package-test run-package-promote nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test python-rpm-build python-rpm-test python-rpm-promote python-test

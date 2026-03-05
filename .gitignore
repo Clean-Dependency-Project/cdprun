@@ -67,3 +67,5 @@ _site/
 
 .DS_Store
 lineaje-sbom/sessions/
+packages/
+artifacts/

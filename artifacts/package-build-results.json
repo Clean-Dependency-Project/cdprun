@@ -1,35 +1,35 @@
 {
-  "run_id": "761bbed2e84b052687fd2db85861273d",
+  "run_id": "16068ac919fd892c219ace534b6cc967",
   "results": [
     {
       "target": {
-        "runtime": "nodejs",
-        "version": "22.22.0",
+        "runtime": "python",
+        "version": "3.14.3",
         "target": "rpm",
         "input_mode": "archive-tarball",
-        "input_path": "downloads/node-v22.22.0-linux-x64.tar.xz",
-        "input_sha256": "9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37",
+        "input_path": "downloads/Python-3.14.3.tar.xz",
+        "input_sha256": "a97d5549e9ad81fe17159ed02c68774ad5d266c72f8d9a0b5a9c371fe85d902b",
         "input_platform": "linux",
         "input_arch": "x64",
-        "package_name": "OSPO-nodejs",
-        "install_prefix": "/export/apps/citools/OSPO-nodejs/22.22.0"
+        "package_name": "OSPO-python",
+        "install_prefix": "/export/apps/citools/OSPO-python/3.14.3"
       },
       "build": {
-        "runtime": "nodejs",
-        "version": "22.22.0",
+        "runtime": "python",
+        "version": "3.14.3",
         "package_type": "rpm",
-        "package_name": "OSPO-nodejs",
+        "package_name": "OSPO-python",
         "release": "1",
         "arch": "x86_64",
-        "install_prefix": "/export/apps/citools/OSPO-nodejs/22.22.0",
+        "install_prefix": "/export/apps/citools/OSPO-python/3.14.3",
         "input": {
-          "path": "downloads/node-v22.22.0-linux-x64.tar.xz",
-          "sha256": "9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37"
+          "path": "downloads/Python-3.14.3.tar.xz",
+          "sha256": "a97d5549e9ad81fe17159ed02c68774ad5d266c72f8d9a0b5a9c371fe85d902b"
         },
-        "package_filename": "OSPO-nodejs-22.22.0-1.amzn2023.x86_64.rpm",
-        "package_path": "packages/OSPO-nodejs-22.22.0-1.amzn2023.x86_64.rpm",
-        "package_sha256": "2ad4eb0ba79baa0ffdd43edaa25589d16fc8a6f9a4f3c7971fc6f9d51b031aac",
-        "duration": 57409024777
+        "package_filename": "OSPO-python-3.14.3-1.amzn2023.x86_64.rpm",
+        "package_path": "packages/OSPO-python-3.14.3-1.amzn2023.x86_64.rpm",
+        "package_sha256": "c413107e293bbf1c5c37369ac3991bbf2d2fd5027b411cecc1297e8c078049d4",
+        "duration": 2415507860243
       },
       "success": true
     }

@@ -3,16 +3,22 @@
 #
 # Usage: rpmbuild -bb python.spec --define "runtime_version 3.13.11"
 
-%define _install_prefix /export/apps/citools/python/python-%{runtime_version}
+%global runtime_version %{?runtime_version}%{!?runtime_version:3.13.11}
+%global runtime_release %{?runtime_release}%{!?runtime_release:1}
+%global package_name %{?package_name}%{!?package_name:python-%{runtime_version}}
+%global source_filename %{?source_filename}%{!?source_filename:Python-%{runtime_version}.tgz}
+%global install_prefix %{?install_prefix}%{!?install_prefix:/export/apps/citools/python/python-%{runtime_version}}
 
-Name:           python-%{runtime_version}
-Version:        1
-Release:        1%{?dist}
+%define _install_prefix %{install_prefix}
+
+Name:           %{package_name}
+Version:        %{runtime_version}
+Release:        %{runtime_release}%{?dist}
 Summary:        Python %{runtime_version} runtime
 
 License:        PSF-2.0
 URL:            https://www.python.org
-Source0:        Python-%{runtime_version}.tgz
+Source0:        %{source_filename}
 
 # Disable automatic dependency generation (self-contained installation)
 AutoReqProv:    no
@@ -75,5 +81,8 @@ if [ $1 -eq 0 ]; then
 fi
 
 %changelog
+* Wed Mar 04 2026 CDP Team <cdp@example.com> - 1-1
+- Add macro overrides for shared package execute pipeline.
+
 * Tue Feb 04 2025 CDP Team <cdp@example.com> - 1-1
 - Initial RPM package for Python (compiled from source)
