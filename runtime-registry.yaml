@@ -207,6 +207,12 @@ runtimes:
       check_eol: true
       warn_on_eol: true
 
+    release:
+      auto_release: true
+      github_repository: "Clean-Dependency-Project/cdprun"
+      draft_release: false
+      release_name_template: "Temurin Runtime Binaries - {version}"
+
     # Nexus integration
     nexus:
       enabled: true

@@ -92,13 +92,13 @@ build-all:
 run-download: build-only
 	@echo "Running download stage..."
 	@mkdir -p $(ARTIFACTS_DIR) $(DOWNLOADS_DIR) $(PACKAGES_DIR) bin
-	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error download --output json --output-dir $(DOWNLOADS_DIR) > $(ARTIFACTS_DIR)/download-summary.json
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level $(RUN_LOG_LEVEL) download --output json --output-dir $(DOWNLOADS_DIR) > $(ARTIFACTS_DIR)/download-summary.json
 
 run-package-build: build-only
 	@echo "Running package build stage..."
 	@test -f "$(PACKAGE_MANIFEST_RESOLVED)" || (echo "missing resolved manifest: $(PACKAGE_MANIFEST_RESOLVED)" && exit 1)
 	@mkdir -p $(ARTIFACTS_DIR) $(PACKAGES_DIR)
-	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level $(RUN_LOG_LEVEL) package execute \
 		--stage build \
 		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
 		--build-results $(PACKAGE_BUILD_RESULTS) \
@@ -112,7 +112,7 @@ run-package-test: build-only
 	@test -f "$(PACKAGE_MANIFEST_BUILT)" || (echo "missing built manifest: $(PACKAGE_MANIFEST_BUILT)" && exit 1)
 	@test -f "$(PACKAGE_BUILD_RESULTS)" || (echo "missing build results: $(PACKAGE_BUILD_RESULTS)" && exit 1)
 	@mkdir -p $(ARTIFACTS_DIR)
-	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package execute \
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level $(RUN_LOG_LEVEL) package execute \
 		--stage test \
 		--manifest $(PACKAGE_MANIFEST_RESOLVED) \
 		--build-results $(PACKAGE_BUILD_RESULTS) \
@@ -126,7 +126,7 @@ run-package-promote: build-only
 	@test -f "$(PACKAGE_MANIFEST_TESTED)" || (echo "missing tested manifest: $(PACKAGE_MANIFEST_TESTED)" && exit 1)
 	@test -f "$(PACKAGE_TEST_RESULTS)" || (echo "missing test results: $(PACKAGE_TEST_RESULTS)" && exit 1)
 	@mkdir -p $(ARTIFACTS_DIR)
-	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level error package promote \
+	@./$(BINARY_PATH) --config $(RUNTIME_CONFIG) --log-level $(RUN_LOG_LEVEL) package promote \
 		--db ./downloads.db \
 		--manifest $(PACKAGE_MANIFEST_TESTED) \
 		--test-results $(PACKAGE_TEST_RESULTS) \
@@ -174,6 +174,7 @@ ARTIFACTS_DIR ?= ./artifacts
 DOWNLOADS_DIR ?= ./downloads
 PACKAGES_DIR ?= ./packages
 RUNTIME_CONFIG ?= ./runtime-registry.yaml
+RUN_LOG_LEVEL ?= info
 
 PACKAGE_MANIFEST_RESOLVED ?= $(DOWNLOADS_DIR)/package-manifest.resolved.json
 PACKAGE_MANIFEST_BUILT ?= $(ARTIFACTS_DIR)/package-manifest.built.json
