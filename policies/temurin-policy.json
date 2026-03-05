@@ -1,0 +1,88 @@
+[
+  {
+    "version": "25",
+    "releaseDate": "2026-03-05",
+    "eol": "2026-09-03",
+    "lts": false,
+    "recommended": true,
+    "supported": true,
+    "under_review": false
+  },
+  {
+    "version": "24",
+    "releaseDate": "2025-03-20",
+    "eol": "2025-09-16",
+    "latest_patch_version": "24.0.1+9.1",
+    "latestReleaseDate": "2025-04-28",
+    "lts": false,
+    "recommended": false,
+    "supported": false,
+    "under_review": false
+  },
+  {
+    "version": "23",
+    "releaseDate": "2024-09-17",
+    "eol": "2025-03-18",
+    "latest_patch_version": "23.0.2+7",
+    "latestReleaseDate": "2025-01-23",
+    "lts": false,
+    "recommended": false,
+    "supported": false,
+    "under_review": false
+  },
+  {
+    "version": "22",
+    "releaseDate": "2024-03-20",
+    "eol": "2024-09-17",
+    "latest_patch_version": "22.0.2+9",
+    "latestReleaseDate": "2024-07-17",
+    "lts": false,
+    "recommended": false,
+    "supported": false,
+    "under_review": false
+  },
+  {
+    "version": "21",
+    "releaseDate": "2023-09-19",
+    "eol": "2024-03-19",
+    "latest_patch_version": "21.0.4+7",
+    "latestReleaseDate": "2024-01-16",
+    "lts": true,
+    "recommended": false,
+    "supported": true,
+    "under_review": false
+  },
+  {
+    "version": "17",
+    "releaseDate": "2021-09-14",
+    "eol": "2024-09-30",
+    "latest_patch_version": "17.0.12+7",
+    "latestReleaseDate": "2024-07-16",
+    "lts": true,
+    "recommended": false,
+    "supported": true,
+    "under_review": false
+  },
+  {
+    "version": "11",
+    "releaseDate": "2018-09-25",
+    "eol": "2024-09-30",
+    "latest_patch_version": "11.0.24+8",
+    "latestReleaseDate": "2024-07-16",
+    "lts": true,
+    "recommended": false,
+    "supported": true,
+    "under_review": false
+  },
+  {
+    "version": "8",
+    "releaseDate": "2017-09-21",
+    "eol": "2022-03-31",
+    "latest_patch_version": "8u412-b08",
+    "latestReleaseDate": "2024-04-16",
+    "lts": false,
+    "recommended": false,
+    "supported": false,
+    "under_review": false
+  }
+] 

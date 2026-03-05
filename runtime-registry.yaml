@@ -150,6 +150,74 @@ runtimes:
              image: "amazonlinux:2023"
              shell: "/bin/bash"
              script: "bash /workspace/scripts/package/rpm/test.sh"
+  temurin:
+    enabled: true
+    name: "Eclipse Temurin"
+    description: "OpenJDK distribution from Eclipse Foundation (Adoptium)"
+    endoflife_product: "temurin"  # Correct: Use "temurin" for endoflife.date API
+    policy_file: "policies/temurin-policy.json"
+
+    # Version management
+    version_pattern: "major"  # Java uses major versioning (8, 11, 17, 21, etc.)
+    supported_architectures:
+      - "x64"
+      - "aarch64"  # Add ARM64 support
+    supported_platforms:
+      - os: "windows"
+        arch: ["x64", "aarch64"]  # Support both x64 and ARM64
+        file_extension: "msi"  # MSI preferred on Windows
+        download_name: "windows"
+      - os: "linux"
+        arch: ["x64"]  # Keep Linux as x64 only for now
+        file_extension: "tar.gz"  # tar.gz for Linux
+        download_name: "linux"
+      - os: "mac"
+        arch: ["x64", "aarch64"]  # Support both x64 and ARM64
+        file_extension: "pkg"  # PKG for macOS
+        download_name: "mac"
+
+    # Download configuration - Uses Adoptium API
+    download:
+      base_url: "https://api.adoptium.net/v3/assets/version"
+      url_pattern: "{base_url}/{version}"
+      user_agent: "downloadruntime/1.0 (Temurin)"
+      requires_auth: false
+      disable_github_token_check: false  # Set to true to disable GitHub token warnings
+
+    # Verification configuration
+    verification:
+      enabled: true
+      methods:
+        checksum:
+          enabled: true
+          algorithm: "sha256"
+          file_pattern: "*.sha256.txt"
+          remote_checksum: true
+        gpg:
+          enabled: true
+          signature_pattern: "*.sig"
+      audit_logging:
+        enabled: true
+        output_dir: "./verification-logs"
+        file_pattern: "{runtime}-{version}-{timestamp}.json"
+
+    # EndOfLife integration
+    endoflife:
+      product_name: "eclipse-temurin"
+      check_eol: true
+      warn_on_eol: true
+
+    # Nexus integration
+    nexus:
+      enabled: true
+      path_pattern: "{os_folder}/{software_name}/{version}/{filename}" # Windows/Temurin_v21/21.0.1/filename
+      # Platform-specific path patterns (optional)
+      platform_patterns:
+        windows: "Windows/{runtime}/v{major_version}/{version}/{filename}"  # Windows/Temurin/v21/21.0.1/filename
+        linux: "Linux/{runtime}/v{major_version}/{version}/{filename}"      # Linux/Temurin/v21/21.0.1/filename
+        mac: "Mac/{runtime}/v{major_version}/{version}/{filename}"          # Mac/Temurin/v21/21.0.1/filename
+      upload_after_download: true                                # Upload immediately after download
+      upload_after_verification: true                           # Upload after successful verification
   tomcat:
     enabled: false
     name: "Apache Tomcat"
