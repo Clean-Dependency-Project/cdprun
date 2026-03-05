@@ -26,6 +26,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
+	temurinAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/temurin"
 	tomcatAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/tomcat"
 	yarnAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/yarn"
 	"github.com/clean-dependency-project/cdprun/internal/sitegen"
@@ -608,6 +609,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 			adapter := yarnAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("yarn", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register yarn adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
+		case "temurin":
+			adapter := temurinAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("temurin", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register temurin adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,
