@@ -326,6 +326,18 @@ func TestRuntime_Validate(t *testing.T) {
 			runtimeName: "python",
 			expectError: true,
 		},
+		{
+			name: "vscode runtime can skip policy file",
+			runtime: Runtime{
+				Enabled:          true,
+				EndOfLifeProduct: "vscode",
+				Verification: Verification{
+					Enabled: false,
+				},
+			},
+			runtimeName: "vscode",
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {

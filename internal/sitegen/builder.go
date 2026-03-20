@@ -192,6 +192,15 @@ func buildReleaseModelForOS(rel ReleaseWithArtifacts, osFilter string) ReleaseMo
 			}
 		}
 
+		if platform.MetadataFile != nil {
+			artifact.MetadataFile = &FileModel{
+				Filename: platform.MetadataFile.Filename,
+				Size:     platform.MetadataFile.Size,
+				SHA256:   platform.MetadataFile.SHA256,
+				URL:      platform.MetadataFile.URL,
+			}
+		}
+
 		artifacts = append(artifacts, artifact)
 	}
 

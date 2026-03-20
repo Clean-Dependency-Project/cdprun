@@ -39,6 +39,7 @@ type PlatformArtifact struct {
 	Audit        *AuditArtifact `json:"audit"`
 	Signature    *ArtifactFile  `json:"signature,omitempty"`   // Cosign .sig file
 	Certificate  *ArtifactFile  `json:"certificate,omitempty"` // Cosign .cert file
+	MetadataFile *ArtifactFile  `json:"metadata_file,omitempty"`
 }
 
 // ArtifactFile represents a single file artifact (binary, signature, certificate).

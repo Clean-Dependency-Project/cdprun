@@ -12,8 +12,8 @@ import (
 
 // Sentinel errors for release operations.
 var (
-	ErrNilRelease      = errors.New("release cannot be nil")
-	ErrReleaseNotFound = errors.New("release not found")
+	ErrNilRelease          = errors.New("release cannot be nil")
+	ErrReleaseNotFound     = errors.New("release not found")
 	ErrNilPlatformArtifact = errors.New("platform artifact cannot be nil")
 )
 
@@ -242,8 +242,10 @@ func countReleaseArtifacts(a ReleaseArtifacts) int {
 		if p.Certificate != nil {
 			total++
 		}
+		if p.MetadataFile != nil {
+			total++
+		}
 	}
 	total += len(a.CommonFiles)
 	return total
 }
-

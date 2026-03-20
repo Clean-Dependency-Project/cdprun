@@ -365,3 +365,50 @@ runtimes:
               image: "alpine:3.19"
               shell: "/bin/sh"
               script: "sh /workspace/scripts/package/apk/test.sh"
+  vscode:
+    enabled: true
+    name: "Visual Studio Code"
+    description: "VSCode binaries for Windows and macOS"
+    endoflife_product: "vscode"
+    policy_file: ""
+    version_pattern: "major"
+    supported_architectures:
+      - "x64"
+      - "aarch64"
+    supported_platforms:
+      - os: "windows"
+        arch: ["x64", "aarch64"]
+        file_extension: "exe"
+        download_name: "win32"
+      - os: "mac"
+        arch: ["x64", "aarch64"]
+        file_extension: "zip"
+        download_name: "darwin-universal"
+    download:
+      base_url: "https://update.code.visualstudio.com"
+      url_pattern: ""
+      user_agent: "cdprun/1.0 (VSCode)"
+      requires_auth: false
+    verification:
+      enabled: true
+      methods:
+        checksum:
+          enabled: true
+          algorithm: "sha256"
+          file_pattern: "api/update/{platform}/stable/latest.sha256hash"
+          remote_checksum: true
+        gpg:
+          enabled: false
+          signature_pattern: ""
+    endoflife:
+      product_name: "vscode"
+      check_eol: false
+      warn_on_eol: false
+    release:
+      auto_release: true
+      github_repository: "Clean-Dependency-Project/cdprun"
+      draft_release: false
+      release_name_template: "VSCode Runtime Binaries - {version}"
+    packaging:
+      enabled: false
+      targets: []

@@ -24,6 +24,7 @@ type SimpleArtifactEntry struct {
 	DownloadURL string `json:"download_url"`
 	SHA256      string `json:"sha256,omitempty"`
 	Audit       string `json:"audit,omitempty"`
+	Metadata    string `json:"metadata,omitempty"`
 	Version     string `json:"version"`
 }
 
@@ -322,6 +323,9 @@ func collectArtifactIndexByMajor(runtime RuntimeModel, major int) SimpleVersionI
 					if artifact.Audit != nil {
 						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
 					}
+					if artifact.MetadataFile != nil {
+						entry.Metadata = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.MetadataFile.Filename)
+					}
 
 					index[os] = append(index[os], entry)
 				}
@@ -382,6 +386,9 @@ func collectRuntimeArtifactIndex(runtime RuntimeModel) SimpleRootIndex {
 					}
 					if artifact.Audit != nil {
 						entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
+					}
+					if artifact.MetadataFile != nil {
+						entry.Metadata = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.MetadataFile.Filename)
 					}
 
 					index[os] = append(index[os], entry)
@@ -448,6 +455,18 @@ func collectDistributionsFromVersion(version VersionModel, distMap map[string]Di
 						Filename: artifact.Certificate.Filename,
 						URL:      artifact.Certificate.URL,
 						SHA256:   artifact.Certificate.SHA256,
+					}
+				}
+			}
+
+			// Add metadata/proof files
+			if artifact.MetadataFile != nil {
+				distKey := artifact.MetadataFile.Filename + "|" + artifact.MetadataFile.URL
+				if _, exists := distMap[distKey]; !exists {
+					distMap[distKey] = DistributionModel{
+						Filename: artifact.MetadataFile.Filename,
+						URL:      artifact.MetadataFile.URL,
+						SHA256:   artifact.MetadataFile.SHA256,
 					}
 				}
 			}
@@ -539,6 +558,9 @@ func collectAllArtifactIndex(model *SiteModel) SimpleRootIndex {
 						}
 						if artifact.Audit != nil {
 							entry.Audit = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.Audit.Filename)
+						}
+						if artifact.MetadataFile != nil {
+							entry.Metadata = fmt.Sprintf("%s/%s", release.ReleaseTag, artifact.MetadataFile.Filename)
 						}
 
 						index[os] = append(index[os], entry)
