@@ -219,7 +219,8 @@ func (rm *ReleaseManager) createGitHubRelease(tag, name, body string, draft bool
 }
 
 // collectRuntimeArtifactFiles scans the output directory for runtime files related to this release.
-// This includes binaries, audit.json files, signatures (.sig/.asc), and certificates (.cert).
+// This includes binaries, audit.json files, signatures (.sig/.asc), certificates (.cert),
+// and metadata/proof files (*.metadata.json).
 // Empty (0-byte) files are skipped as they indicate failed downloads.
 // For security-only releases where the binary version differs from the recorded version,
 // this function uses the database to find the actual filenames.
@@ -247,10 +248,17 @@ func (rm *ReleaseManager) collectRuntimeArtifactFiles(outputDir, runtimeName, ve
 	} else {
 		for _, dl := range downloads {
 			dbFilenames[dl.Filename] = true
-			// Also add related files (signature, audit)
+			// Also add related files (signature, audit, metadata/proof).
 			dbFilenames[dl.Filename+".asc"] = true
 			dbFilenames[dl.Filename+".sig"] = true
 			dbFilenames[dl.Filename+".audit.json"] = true
+			dbFilenames[dl.Filename+".metadata.json"] = true
+			ext := filepath.Ext(dl.Filename)
+			stem := strings.TrimSuffix(dl.Filename, ext)
+			if stem != dl.Filename {
+				dbFilenames[stem+".audit.json"] = true
+				dbFilenames[stem+".metadata.json"] = true
+			}
 		}
 	}
 
@@ -717,20 +725,24 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 		}
 
 		plat := platforms[platformKey]
+		artifactSize := fileInfo.Size
+		if artifactSize == 0 {
+			artifactSize = info.Size
+		}
 
 		// Categorize the file
 		switch {
 		case strings.HasSuffix(originalFilename, ".audit.json"):
 			plat.Audit = &storage.AuditArtifact{
 				Filename:   uploadedFilename,
-				Size:       fileInfo.Size,
+				Size:       artifactSize,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
 			}
 		case strings.HasSuffix(originalFilename, ".sig"), strings.HasSuffix(originalFilename, ".asc"):
 			plat.Signature = &storage.ArtifactFile{
 				Filename:   uploadedFilename,
-				Size:       fileInfo.Size,
+				Size:       artifactSize,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
@@ -738,7 +750,15 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 		case strings.HasSuffix(originalFilename, ".cert"):
 			plat.Certificate = &storage.ArtifactFile{
 				Filename:   uploadedFilename,
-				Size:       fileInfo.Size,
+				Size:       artifactSize,
+				SHA256:     info.SHA256,
+				URL:        info.URL,
+				UploadedAt: time.Now(),
+			}
+		case strings.HasSuffix(originalFilename, ".metadata.json"):
+			plat.MetadataFile = &storage.ArtifactFile{
+				Filename:   uploadedFilename,
+				Size:       artifactSize,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
@@ -747,7 +767,7 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 			// Binary artifact
 			plat.Binary = &storage.ArtifactFile{
 				Filename:   uploadedFilename,
-				Size:       fileInfo.Size,
+				Size:       artifactSize,
 				SHA256:     info.SHA256,
 				URL:        info.URL,
 				UploadedAt: time.Now(),
@@ -835,6 +855,31 @@ func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult)
 			Arch:    packageArchFromFilename(filename),
 			Type:    "binary",
 		}, nil
+	}
+
+	// Related verification/proof files may append known suffixes to the binary name.
+	// Try resolving back to the original binary filename and map platform via downloadResults.
+	baseFilename := filename
+	for _, suffix := range []string{".audit.json", ".metadata.json", ".asc", ".sig", ".cert"} {
+		if strings.HasSuffix(baseFilename, suffix) {
+			baseFilename = strings.TrimSuffix(baseFilename, suffix)
+			break
+		}
+	}
+	if baseFilename != filename {
+		for _, result := range downloadResults {
+			binaryFilename := filepath.Base(result.LocalPath)
+			binaryStem := strings.TrimSuffix(binaryFilename, filepath.Ext(binaryFilename))
+			if binaryFilename == baseFilename || binaryStem == baseFilename {
+				return &fileInfo{
+					Size:    result.FileSize,
+					Version: result.Version,
+					OS:      result.Platform.OS,
+					Arch:    result.Platform.Arch,
+					Type:    "artifact",
+				}, nil
+			}
+		}
 	}
 
 	// Try to find matching download result for platform-specific files

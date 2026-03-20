@@ -28,6 +28,7 @@ import (
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
 	temurinAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/temurin"
 	tomcatAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/tomcat"
+	vscodeAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/vscode"
 	yarnAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/yarn"
 	"github.com/clean-dependency-project/cdprun/internal/sitegen"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
@@ -93,7 +94,7 @@ func NewApp() *cli.App {
 					&cli.StringFlag{
 						Name:    "runtime",
 						Aliases: []string{"r"},
-						Usage:   "runtime name (nodejs, python, tomcat, yarn). If not specified, downloads all enabled runtimes from config",
+						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode). If not specified, downloads all enabled runtimes from config",
 					},
 					&cli.StringFlag{
 						Name:    "version",
@@ -623,6 +624,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 				"runtime", runtimeName,
 				"endoflife_product", runtimeConfig.EndOfLifeProduct,
 				"policy_file", runtimeConfig.PolicyFile)
+		case "vscode":
+			adapter := vscodeAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("vscode", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register vscode adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
 		default:
 			stderr.Warn("unsupported runtime", "runtime", runtimeName)
 		}
@@ -820,54 +830,67 @@ func downloadSingleRuntime(c *cli.Context, manager *runtime.Manager, cfg *config
 	var versionsToDownload []runtime.VersionInfo
 
 	if version == "" {
-		// No version specified - try policy file first, then fallback to API
-		policyFilePath := runtimeConfig.PolicyFile
-		if policyFilePath == "" {
-			policyFilePath = filepath.Join("policies", runtimeName+"-policy.json")
-		}
-
-		if _, err := os.Stat(policyFilePath); err == nil {
-			stdout.Info("found policy file, using it for version discovery", "path", policyFilePath)
-
-			// Get all versions from endoflife.date API
-			allVersions, err := manager.ListVersions(context.Background(), runtimeName)
-			if err != nil {
-				stderr.Error("failed to list versions", "runtime", runtimeName, "error", err)
-				return fmt.Errorf("failed to list versions: %w", err)
-			}
-			stdout.Info("retrieved versions from endoflife.date", "runtime", runtimeName, "version_count", len(allVersions))
-
-			// Load policy file
-			policyVersions, err := provider.LoadPolicy(policyFilePath)
-			if err != nil {
-				stderr.Error("failed to load policy", "policy_file", policyFilePath, "error", err)
-				return fmt.Errorf("failed to load policy: %w", err)
-			}
-			stdout.Info("loaded policy file", "policy_file", policyFilePath, "policy_version_count", len(policyVersions))
-
-			// Apply policy to filter supported versions
-			supportedVersions, err := provider.ApplyPolicy(allVersions, policyVersions)
-			if err != nil {
-				stderr.Error("failed to apply policy", "error", err)
-				return fmt.Errorf("failed to apply policy: %w", err)
-			}
-			stdout.Info("filtered by policy", "supported_count", len(supportedVersions))
-
-			versionsToDownload = supportedVersions
-		} else {
-			// No policy file - use endoflife.date API
-			stdout.Info("no policy file found, using endoflife.date API for version discovery", "runtime", runtimeName)
+		if strings.EqualFold(runtimeName, "vscode") {
+			stdout.Info("vscode runtime skips policy and always uses latest metadata")
 			versionsToDownload, err = provider.GetMaintainedVersions(context.Background())
 			if err != nil {
 				stderr.Error("failed to get maintained versions", "runtime", runtimeName, "error", err)
 				return fmt.Errorf("failed to get maintained versions: %w", err)
 			}
-			stdout.Info("discovered maintained versions from API", "count", len(versionsToDownload))
-		}
+			if len(versionsToDownload) == 0 {
+				stderr.Warn("no supported versions found")
+				return fmt.Errorf("no supported versions found")
+			}
+		} else {
+			// No version specified - try policy file first, then fallback to API
+			policyFilePath := runtimeConfig.PolicyFile
+			if policyFilePath == "" {
+				policyFilePath = filepath.Join("policies", runtimeName+"-policy.json")
+			}
 
-		if len(versionsToDownload) == 0 {
-			stderr.Warn("no supported versions found")
-			return fmt.Errorf("no supported versions found")
+			if _, err := os.Stat(policyFilePath); err == nil {
+				stdout.Info("found policy file, using it for version discovery", "path", policyFilePath)
+
+				// Get all versions from endoflife.date API
+				allVersions, err := manager.ListVersions(context.Background(), runtimeName)
+				if err != nil {
+					stderr.Error("failed to list versions", "runtime", runtimeName, "error", err)
+					return fmt.Errorf("failed to list versions: %w", err)
+				}
+				stdout.Info("retrieved versions from endoflife.date", "runtime", runtimeName, "version_count", len(allVersions))
+
+				// Load policy file
+				policyVersions, err := provider.LoadPolicy(policyFilePath)
+				if err != nil {
+					stderr.Error("failed to load policy", "policy_file", policyFilePath, "error", err)
+					return fmt.Errorf("failed to load policy: %w", err)
+				}
+				stdout.Info("loaded policy file", "policy_file", policyFilePath, "policy_version_count", len(policyVersions))
+
+				// Apply policy to filter supported versions
+				supportedVersions, err := provider.ApplyPolicy(allVersions, policyVersions)
+				if err != nil {
+					stderr.Error("failed to apply policy", "error", err)
+					return fmt.Errorf("failed to apply policy: %w", err)
+				}
+				stdout.Info("filtered by policy", "supported_count", len(supportedVersions))
+
+				versionsToDownload = supportedVersions
+			} else {
+				// No policy file - use endoflife.date API
+				stdout.Info("no policy file found, using endoflife.date API for version discovery", "runtime", runtimeName)
+				versionsToDownload, err = provider.GetMaintainedVersions(context.Background())
+				if err != nil {
+					stderr.Error("failed to get maintained versions", "runtime", runtimeName, "error", err)
+					return fmt.Errorf("failed to get maintained versions: %w", err)
+				}
+				stdout.Info("discovered maintained versions from API", "count", len(versionsToDownload))
+			}
+
+			if len(versionsToDownload) == 0 {
+				stderr.Warn("no supported versions found")
+				return fmt.Errorf("no supported versions found")
+			}
 		}
 	} else {
 		// Specific version requested

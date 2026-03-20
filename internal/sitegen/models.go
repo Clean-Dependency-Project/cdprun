@@ -55,6 +55,7 @@ type ArtifactModel struct {
 	Audit        *FileModel
 	Signature    *FileModel
 	Certificate  *FileModel
+	MetadataFile *FileModel
 }
 
 // FileModel represents a single file with its metadata.

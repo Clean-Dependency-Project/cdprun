@@ -49,10 +49,10 @@ type StorageConfig struct {
 
 // GlobalConfig represents global configuration settings.
 type GlobalConfig struct {
-	DownloadTimeout          string        `yaml:"download_timeout"`
-	AutoDownloadAllPlatforms bool          `yaml:"auto_download_all_platforms"`
-	Storage                  StorageConfig `yaml:"storage"`
-	IgnoreFile               string        `yaml:"ignore_file"` // Path to JSON file listing versions to ignore per runtime
+	DownloadTimeout          string                   `yaml:"download_timeout"`
+	AutoDownloadAllPlatforms bool                     `yaml:"auto_download_all_platforms"`
+	Storage                  StorageConfig            `yaml:"storage"`
+	IgnoreFile               string                   `yaml:"ignore_file"` // Path to JSON file listing versions to ignore per runtime
 	PackagingExecution       PackagingExecutionConfig `yaml:"packaging_execution"`
 }
 
@@ -77,27 +77,27 @@ func (g *GlobalConfig) GetDownloadTimeout() time.Duration {
 
 // Runtime represents configuration for a specific runtime.
 type Runtime struct {
-	Enabled                bool               `yaml:"enabled"`
-	Name                   string             `yaml:"name"`
-	Description            string             `yaml:"description"`
-	EndOfLifeProduct       string             `yaml:"endoflife_product"`
-	PolicyFile             string             `yaml:"policy_file"`
-	VersionPattern         string             `yaml:"version_pattern"`
-	SupportedArchitectures []string           `yaml:"supported_architectures"`
-	SupportedPlatforms     []PlatformConfig   `yaml:"supported_platforms"`
-	Download               DownloadConfig     `yaml:"download"`
-	Verification           Verification       `yaml:"verification"`
-	EndOfLife              EndOfLifeConfig    `yaml:"endoflife"`
-	Release                ReleaseConfig      `yaml:"release"`
-	Packaging              PackagingConfig    `yaml:"packaging"`
+	Enabled                bool             `yaml:"enabled"`
+	Name                   string           `yaml:"name"`
+	Description            string           `yaml:"description"`
+	EndOfLifeProduct       string           `yaml:"endoflife_product"`
+	PolicyFile             string           `yaml:"policy_file"`
+	VersionPattern         string           `yaml:"version_pattern"`
+	SupportedArchitectures []string         `yaml:"supported_architectures"`
+	SupportedPlatforms     []PlatformConfig `yaml:"supported_platforms"`
+	Download               DownloadConfig   `yaml:"download"`
+	Verification           Verification     `yaml:"verification"`
+	EndOfLife              EndOfLifeConfig  `yaml:"endoflife"`
+	Release                ReleaseConfig    `yaml:"release"`
+	Packaging              PackagingConfig  `yaml:"packaging"`
 }
 
 // PackagingConfig represents OS package build configuration for a runtime.
 type PackagingConfig struct {
-	Enabled               bool     `yaml:"enabled"`
-	Targets               []string `yaml:"targets"`                  // Supported values: rpm, apk
-	PackageNameTemplate   string   `yaml:"package_name_template"`    // e.g. OSPO-{runtime}
-	InstallPrefixTemplate string   `yaml:"install_prefix_template"`  // e.g. /export/apps/citools/OSPO-{runtime}/{version}
+	Enabled               bool                      `yaml:"enabled"`
+	Targets               []string                  `yaml:"targets"`                 // Supported values: rpm, apk
+	PackageNameTemplate   string                    `yaml:"package_name_template"`   // e.g. OSPO-{runtime}
+	InstallPrefixTemplate string                    `yaml:"install_prefix_template"` // e.g. /export/apps/citools/OSPO-{runtime}/{version}
 	Execution             PackagingExecutionTargets `yaml:"execution"`
 }
 
@@ -144,9 +144,9 @@ type EndOfLifeConfig struct {
 
 // ReleaseConfig represents GitHub release configuration for a runtime.
 type ReleaseConfig struct {
-	AutoRelease      bool   `yaml:"auto_release"`       // Enable automatic GitHub release creation
-	GitHubRepository string `yaml:"github_repository"`  // Repository in "owner/repo" format
-	DraftRelease     bool   `yaml:"draft_release"`      // Create as draft (default: false)
+	AutoRelease         bool   `yaml:"auto_release"`          // Enable automatic GitHub release creation
+	GitHubRepository    string `yaml:"github_repository"`     // Repository in "owner/repo" format
+	DraftRelease        bool   `yaml:"draft_release"`         // Create as draft (default: false)
 	ReleaseNameTemplate string `yaml:"release_name_template"` // e.g., "Node.js {version}"
 }
 
@@ -290,7 +290,8 @@ func (r *Runtime) Validate(name string) error {
 	if r.EndOfLifeProduct == "" {
 		return ErrEndoflifeProductRequired
 	}
-	if r.PolicyFile == "" {
+	// VSCode uses latest-only update API metadata and intentionally has no policy file.
+	if strings.ToLower(strings.TrimSpace(name)) != "vscode" && r.PolicyFile == "" {
 		return ErrPolicyFileRequired
 	}
 

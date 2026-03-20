@@ -399,7 +399,7 @@ func (a *TemurinAdapter) CreateDownloadTasks(version endoflife.VersionInfo, plat
 	}
 
 	tasks := make([]runtime.DownloadTask, 0)
-	userAgent := fmt.Sprintf("downloadruntime/1.0 (temurin)")
+	userAgent := "downloadruntime/1.0 (temurin)"
 
 	for _, plat := range platforms {
 		// Find the appropriate binary for this platform
@@ -569,7 +569,7 @@ func (a *TemurinAdapter) VerifySignature(dataFilePath, signatureFilePath string)
 
 	err = gpg.VerifyDetachedSignature(keyRing, dataFilePath, signatureFilePath)
 	if err != nil {
-		return fmt.Errorf("Temurin GPG signature verification failed: %w", err)
+		return fmt.Errorf("temurin GPG signature verification failed: %w", err)
 	}
 
 	a.stdout.Info("Temurin GPG signature verification successful",
@@ -766,7 +766,7 @@ func (v *TemurinVerificationStrategy) createIndividualAuditFile(result runtime.D
 	// have access to the main file's DownloadResult here. For Temurin, these URLs typically
 	// follow the pattern of main URL + extension, but this is not guaranteed.
 	var checksumFileURL, signatureFileURL string
-	var urlsAreReconstructed bool = true
+	var urlsAreReconstructed = true
 
 	if result.URL != "" {
 		checksumFileURL = result.URL + ".sha256.txt"
@@ -1021,7 +1021,7 @@ func (a *TemurinAdapter) getAdoptiumRelease(version string) (*AdoptiumRelease, e
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("Adoptium API returned status %d for version %s (formatted as %s)", resp.StatusCode, version, adoptiumVersion)
+			lastErr = fmt.Errorf("adoptium API returned status %d for version %s (formatted as %s)", resp.StatusCode, version, adoptiumVersion)
 			continue
 		}
 

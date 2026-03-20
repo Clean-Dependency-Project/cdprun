@@ -32,11 +32,11 @@ func LoadReleases(reader ReleaseReader) ([]ReleaseWithArtifacts, error) {
 				version = strings.TrimSpace(version)
 				// Create filtered artifacts for this specific version
 				filteredArtifacts := filterArtifactsForVersion(artifacts, version)
-				
+
 				// Create a copy of the release with single version
 				individualRelease := release
 				individualRelease.Version = version
-				
+
 				// Parse semver for individual version
 				major, minor, patch, err := storage.ParseSemver(version)
 				if err != nil {
@@ -47,7 +47,7 @@ func LoadReleases(reader ReleaseReader) ([]ReleaseWithArtifacts, error) {
 				individualRelease.SemverMajor = major
 				individualRelease.SemverMinor = minor
 				individualRelease.SemverPatch = patch
-				
+
 				result = append(result, ReleaseWithArtifacts{
 					Release:   individualRelease,
 					Artifacts: filteredArtifacts,
@@ -90,6 +90,9 @@ func filterArtifactsForVersion(artifacts storage.ReleaseArtifacts, version strin
 		if platform.Audit != nil && matchesVersion(platform.Audit.Filename, version, majorMinor) {
 			hasMatchingArtifact = true
 		}
+		if platform.MetadataFile != nil && matchesVersion(platform.MetadataFile.Filename, version, majorMinor) {
+			hasMatchingArtifact = true
+		}
 
 		if hasMatchingArtifact {
 			// Create a filtered copy of the platform with only matching artifacts
@@ -110,6 +113,9 @@ func filterArtifactsForVersion(artifacts storage.ReleaseArtifacts, version strin
 			}
 			if platform.Certificate != nil && matchesVersion(platform.Certificate.Filename, version, majorMinor) {
 				filteredPlatform.Certificate = platform.Certificate
+			}
+			if platform.MetadataFile != nil && matchesVersion(platform.MetadataFile.Filename, version, majorMinor) {
+				filteredPlatform.MetadataFile = platform.MetadataFile
 			}
 
 			filtered.Platforms = append(filtered.Platforms, filteredPlatform)
@@ -150,4 +156,3 @@ type ReleaseWithArtifacts struct {
 	Release   storage.Release
 	Artifacts storage.ReleaseArtifacts
 }
-
