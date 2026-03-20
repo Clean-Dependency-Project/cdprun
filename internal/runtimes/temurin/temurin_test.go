@@ -498,9 +498,12 @@ func TestTemurinAdapter_CreateDownloadTasks(t *testing.T) {
 		IsSupported: true, // Make sure it's supported to pass validation
 	}
 
+	// Use Linux arch pairs Adoptium consistently ships for this LTS build. Windows
+	// (and other) installers are not guaranteed for every patch; the adapter skips
+	// missing platforms, which made the old linux+windows expectation flaky.
 	platforms := []platform.Platform{
 		{OS: "linux", Arch: "x64", FileExt: "tar.gz", Classifier: "linux-x64"},
-		{OS: "windows", Arch: "x64", FileExt: "msi", Classifier: "windows-x64"},
+		{OS: "linux", Arch: "aarch64", FileExt: "tar.gz", Classifier: "linux-aarch64"},
 	}
 
 	outputDir := "/tmp/test"
