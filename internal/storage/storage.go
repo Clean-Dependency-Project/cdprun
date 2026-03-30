@@ -346,18 +346,20 @@ func (d *DB) GetStats() (map[string]interface{}, error) {
 	return stats, nil
 }
 
-// ParseSemver parses a semantic version string and returns major, minor, patch components.
-// It expects versions in the format "major.minor.patch" (e.g., "1.2.3").
-// Returns an error if the version string doesn't match the expected format.
+// ParseSemver parses a version string and returns major, minor, patch components.
+// It accepts "major.minor.patch" (e.g., "1.2.3") and "major.minor" (e.g., "2026.1"),
+// treating the latter as patch 0. This handles JetBrains year-based versions like "2026.1".
 func ParseSemver(version string) (major, minor, patch int, err error) {
-	n, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to parse version %q: %w", version, err)
+	n, scanErr := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
+	if n == 3 && scanErr == nil {
+		return major, minor, patch, nil
 	}
-	if n != 3 {
-		return 0, 0, 0, fmt.Errorf("%w: %q", ErrInvalidVersionFmt, version)
+	// Fall back to two-component parse (e.g. "2026.1" → major=2026, minor=1, patch=0).
+	n2, scanErr2 := fmt.Sscanf(version, "%d.%d", &major, &minor)
+	if n2 == 2 && scanErr2 == nil {
+		return major, minor, 0, nil
 	}
-	return major, minor, patch, nil
+	return 0, 0, 0, fmt.Errorf("failed to parse version %q: %w", version, scanErr)
 }
 
 // ExtractFilename extracts the filename from a file path using filepath.Base.
