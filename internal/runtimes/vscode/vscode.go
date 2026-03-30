@@ -335,7 +335,7 @@ func (v *sha256Verifier) Verify(ctx context.Context, result runtime.DownloadResu
 	_ = ctx
 	expected := v.adapter.expectedSHA256(result.Platform.Classifier)
 	if expected == "" {
-		if err := writeVSCodeProofFiles(result, "", "", false, "failed", "missing expected sha256 for platform"); err != nil {
+		if err := runtime.WriteChecksumAuditRecord(result, "", "", false, "failed", "missing expected sha256 for platform"); err != nil {
 			return fmt.Errorf("missing expected sha256 for platform %s and failed writing proof files: %w", result.Platform.Classifier, err)
 		}
 		return fmt.Errorf("missing expected sha256 for platform %s", result.Platform.Classifier)
@@ -349,20 +349,20 @@ func (v *sha256Verifier) Verify(ctx context.Context, result runtime.DownloadResu
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
-		if proofErr := writeVSCodeProofFiles(result, expected, "", false, "failed", "failed to compute sha256"); proofErr != nil {
+		if proofErr := runtime.WriteChecksumAuditRecord(result, expected, "", false, "failed", "failed to compute sha256"); proofErr != nil {
 			return fmt.Errorf("compute sha256 failed: %v; failed writing proof files: %w", err, proofErr)
 		}
 		return fmt.Errorf("compute sha256: %w", err)
 	}
 	actual := hex.EncodeToString(hash.Sum(nil))
 	if actual != expected {
-		if err := writeVSCodeProofFiles(result, expected, actual, false, "failed", "sha256 mismatch"); err != nil {
+		if err := runtime.WriteChecksumAuditRecord(result, expected, actual, false, "failed", "sha256 mismatch"); err != nil {
 			return fmt.Errorf("sha256 mismatch for %s and failed writing proof files: %w", result.Platform.Classifier, err)
 		}
 		return fmt.Errorf("sha256 mismatch for %s: expected %s got %s", result.Platform.Classifier, expected, actual)
 	}
 
-	if err := writeVSCodeProofFiles(result, expected, actual, true, "success", ""); err != nil {
+	if err := runtime.WriteChecksumAuditRecord(result, expected, actual, true, "success", ""); err != nil {
 		return fmt.Errorf("failed writing proof files: %w", err)
 	}
 	return nil
@@ -374,59 +374,4 @@ func (v *sha256Verifier) GetType() string {
 
 func (v *sha256Verifier) RequiresAdditionalFiles() bool {
 	return false
-}
-
-func writeVSCodeProofFiles(
-	result runtime.DownloadResult,
-	expectedChecksum string,
-	actualChecksum string,
-	checksumVerified bool,
-	verificationStatus string,
-	errorMessage string,
-) error {
-	fileName := filepath.Base(result.LocalPath)
-	fileSize := result.FileSize
-	if stat, err := os.Stat(result.LocalPath); err == nil {
-		fileSize = stat.Size()
-	}
-
-	record := map[string]interface{}{
-		"timestamp":           time.Now().UTC().Format(time.RFC3339),
-		"runtime":             VSCode,
-		"version":             result.Version,
-		"platform":            result.Platform.Classifier,
-		"file_name":           fileName,
-		"file_path":           result.LocalPath,
-		"source_url":          result.URL,
-		"file_size":           fileSize,
-		"checksum_algorithm":  "sha256",
-		"checksum_expected":   expectedChecksum,
-		"checksum_actual":     actualChecksum,
-		"checksum_verified":   checksumVerified,
-		"gpg_verified":        false,
-		"verification_status": verificationStatus,
-		"verification_type":   "checksum-sha256",
-	}
-	if errorMessage != "" {
-		record["error"] = errorMessage
-	}
-
-	encoded, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal proof record: %w", err)
-	}
-
-	auditPath := proofArtifactPath(result.LocalPath, "audit.json")
-	if err := os.WriteFile(auditPath, encoded, 0644); err != nil {
-		return fmt.Errorf("write audit file: %w", err)
-	}
-
-	return nil
-}
-
-func proofArtifactPath(localPath, suffix string) string {
-	base := filepath.Base(localPath)
-	ext := filepath.Ext(base)
-	stem := strings.TrimSuffix(base, ext)
-	return filepath.Join(filepath.Dir(localPath), stem+"."+suffix)
 }

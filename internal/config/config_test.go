@@ -338,6 +338,19 @@ func TestRuntime_Validate(t *testing.T) {
 			runtimeName: "vscode",
 			expectError: false,
 		},
+		{
+			name: "intellij_idea_ultimate skips endoflife.date and policy",
+			runtime: Runtime{
+				Enabled:          true,
+				EndOfLifeProduct: "",
+				PolicyFile:       "",
+				Verification: Verification{
+					Enabled: false,
+				},
+			},
+			runtimeName: "intellij_idea_ultimate",
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
