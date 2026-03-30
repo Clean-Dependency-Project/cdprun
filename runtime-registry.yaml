@@ -459,7 +459,7 @@ runtimes:
       check_eol: false
       warn_on_eol: false
     release:
-      auto_release: false
+      auto_release: true
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
       release_name_template: "IntelliJ IDEA Ultimate - {version}"
