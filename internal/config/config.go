@@ -133,6 +133,10 @@ type DownloadConfig struct {
 	URLPattern   string `yaml:"url_pattern"`
 	UserAgent    string `yaml:"user_agent"`
 	RequiresAuth bool   `yaml:"requires_auth"`
+	// JetBrainsCode is the product code for data.services.jetbrains.com (e.g. IIU, IIC).
+	JetBrainsCode string `yaml:"jetbrains_code"`
+	// JetBrainsType is the release channel: release or eap.
+	JetBrainsType string `yaml:"jetbrains_type"`
 }
 
 // EndOfLifeConfig represents endoflife integration configuration.
@@ -282,16 +286,35 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// RuntimeSkipsPolicyFile reports runtimes that resolve versions from an upstream API and do not use policies/*.json.
+func RuntimeSkipsPolicyFile(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "vscode", "intellij_idea_ultimate":
+		return true
+	default:
+		return false
+	}
+}
+
+// RuntimeSkipsEndOfLifeProduct reports runtimes not indexed on endoflife.date; endoflife_product may be omitted.
+func RuntimeSkipsEndOfLifeProduct(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "intellij_idea_ultimate":
+		return true
+	default:
+		return false
+	}
+}
+
 // Validate validates a runtime configuration.
 func (r *Runtime) Validate(name string) error {
 	if !r.Enabled {
 		return nil // Skip validation for disabled runtimes
 	}
-	if r.EndOfLifeProduct == "" {
+	if r.EndOfLifeProduct == "" && !RuntimeSkipsEndOfLifeProduct(name) {
 		return ErrEndoflifeProductRequired
 	}
-	// VSCode uses latest-only update API metadata and intentionally has no policy file.
-	if strings.ToLower(strings.TrimSpace(name)) != "vscode" && r.PolicyFile == "" {
+	if r.PolicyFile == "" && !RuntimeSkipsPolicyFile(name) {
 		return ErrPolicyFileRequired
 	}
 

@@ -185,7 +185,7 @@ func TestExtensionFromDownloadURL(t *testing.T) {
 func assertProofFiles(t *testing.T, filePath string, expectedVerified bool) {
 	t.Helper()
 
-	auditPath := proofArtifactPath(filePath, "audit.json")
+	auditPath := runtime.ProofArtifactPath(filePath, "audit.json")
 	data, err := os.ReadFile(auditPath)
 	if err != nil {
 		t.Fatalf("expected audit proof file %s: %v", auditPath, err)
@@ -202,7 +202,7 @@ func assertProofFiles(t *testing.T, filePath string, expectedVerified bool) {
 		t.Fatalf("checksum_verified in %s = %v, want %v", auditPath, got, expectedVerified)
 	}
 
-	metadataPath := proofArtifactPath(filePath, "metadata.json")
+	metadataPath := runtime.ProofArtifactPath(filePath, "metadata.json")
 	if _, err := os.Stat(metadataPath); !os.IsNotExist(err) {
 		t.Fatalf("metadata proof file should not be created, found %s", metadataPath)
 	}

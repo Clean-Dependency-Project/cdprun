@@ -412,3 +412,57 @@ runtimes:
     packaging:
       enabled: false
       targets: []
+
+  intellij_idea_ultimate:
+    enabled: true
+    name: "IntelliJ IDEA Ultimate"
+    description: "IntelliJ IDEA Ultimate (IIU) — versions from JetBrains releases API only; not on endoflife.date"
+    endoflife_product: ""
+    policy_file: ""
+    version_pattern: "major"
+    supported_architectures:
+      - "x64"
+      - "aarch64"
+    supported_platforms:
+      - os: "mac"
+        arch: ["aarch64"]
+        file_extension: "dmg"
+        download_name: "macM1"
+      - os: "windows"
+        arch: ["aarch64"]
+        file_extension: "exe"
+        download_name: "windowsARM64"
+      - os: "windows"
+        arch: ["x64"]
+        file_extension: "exe"
+        download_name: "windows"
+    download:
+      base_url: "https://data.services.jetbrains.com/products/releases"
+      jetbrains_code: "IIU"
+      jetbrains_type: "release"
+      url_pattern: ""
+      user_agent: "cdprun/1.0 (IntelliJ)"
+      requires_auth: false
+    verification:
+      enabled: true
+      methods:
+        checksum:
+          enabled: true
+          algorithm: "sha256"
+          file_pattern: "jetbrains#checksumLink"
+          remote_checksum: true
+        gpg:
+          enabled: false
+          signature_pattern: ""
+    endoflife:
+      product_name: ""
+      check_eol: false
+      warn_on_eol: false
+    release:
+      auto_release: false
+      github_repository: "Clean-Dependency-Project/cdprun"
+      draft_release: false
+      release_name_template: "IntelliJ IDEA Ultimate - {version}"
+    packaging:
+      enabled: false
+      targets: []

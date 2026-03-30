@@ -24,6 +24,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/platform"
 	"github.com/clean-dependency-project/cdprun/internal/promotion"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
+	intellijAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/intellij"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
 	temurinAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/temurin"
@@ -94,7 +95,7 @@ func NewApp() *cli.App {
 					&cli.StringFlag{
 						Name:    "runtime",
 						Aliases: []string{"r"},
-						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode). If not specified, downloads all enabled runtimes from config",
+						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode, intellij_idea_ultimate). If not specified, downloads all enabled runtimes from config",
 					},
 					&cli.StringFlag{
 						Name:    "version",
@@ -628,6 +629,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 			adapter := vscodeAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("vscode", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register vscode adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
+		case "intellij_idea_ultimate":
+			adapter := intellijAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("intellij_idea_ultimate", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register intellij adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,
