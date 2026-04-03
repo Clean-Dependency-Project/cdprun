@@ -7,7 +7,6 @@
     "lts": false,
     "recommended": true,
     "supported": true,
-    "under_review": false,
-    "latest_patch_version": "1.22.22"
+    "under_review": false
   }
 ]

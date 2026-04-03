@@ -155,16 +155,15 @@ type PolicyRuntime struct {
 
 // PolicyVersion represents a version configuration in the policy
 type PolicyVersion struct {
-	Version            string `json:"version"`
-	ReleaseDate        string `json:"releaseDate,omitempty"`
-	EOL                string `json:"eol,omitempty"`
-	LatestPatchVersion string `json:"latest_patch_version,omitempty"`
-	LatestReleaseDate  string `json:"latestReleaseDate,omitempty"`
-	LTS                bool   `json:"lts"`
-	Recommended        bool   `json:"recommended"`
-	Supported          bool   `json:"supported"`
-	UnderReview        bool   `json:"under_review"`
-	Notes              string `json:"notes,omitempty"`
+	Version           string `json:"version"`
+	ReleaseDate       string `json:"releaseDate,omitempty"`
+	EOL               string `json:"eol,omitempty"`
+	LatestReleaseDate string `json:"latestReleaseDate,omitempty"`
+	LTS               bool   `json:"lts"`
+	Recommended       bool   `json:"recommended"`
+	Supported         bool   `json:"supported"`
+	UnderReview       bool   `json:"under_review"`
+	Notes             string `json:"notes,omitempty"`
 }
 
 // Policy represents the complete policy configuration
@@ -547,7 +546,6 @@ func (c *client) EnrichVersionInfo(ctx context.Context, runtime PolicyRuntime, p
 
 	versionInfo := &VersionInfo{
 		Version:        policyVersion.Version,
-		LatestPatch:    policyVersion.LatestPatchVersion,
 		IsSupported:    policyVersion.Supported,
 		IsRecommended:  policyVersion.Recommended,
 		IsLTS:          policyVersion.LTS,

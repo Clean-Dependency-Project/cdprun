@@ -609,9 +609,6 @@ func (a *PythonAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policyVers
 		if pv.EOL != "" {
 			version.EOLDate = pv.EOL
 		}
-		if pv.LatestPatchVersion != "" {
-			version.LatestPatch = pv.LatestPatchVersion
-		}
 
 		filtered = append(filtered, version)
 	}

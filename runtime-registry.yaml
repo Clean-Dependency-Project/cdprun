@@ -168,7 +168,7 @@ runtimes:
         file_extension: "msi"  # MSI preferred on Windows
         download_name: "windows"
       - os: "linux"
-        arch: ["x64"]  # Keep Linux as x64 only for now
+        arch: ["x64", "aarch64"]  # Support both x64 and ARM64
         file_extension: "tar.gz"  # tar.gz for Linux
         download_name: "linux"
       - os: "mac"
