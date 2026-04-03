@@ -199,16 +199,11 @@ func (a *TemurinAdapter) GetEndOfLifeProduct() string {
 
 // GetSupportedPlatforms returns the list of platforms that Temurin supports.
 func (a *TemurinAdapter) GetSupportedPlatforms() []platform.Platform {
-	return []platform.Platform{
-		// Windows x64
-		{OS: "windows", Arch: "x64", FileExt: "msi", DownloadName: "windows", Classifier: "windows-x64"},
-		{OS: "windows", Arch: "aarch64", FileExt: "msi", DownloadName: "windows", Classifier: "windows-aarch64"},
-		// macOS - use .pkg files
-		{OS: "mac", Arch: "x64", FileExt: "pkg", DownloadName: "mac", Classifier: "mac-x64"},
-		{OS: "mac", Arch: "aarch64", FileExt: "pkg", DownloadName: "mac", Classifier: "mac-aarch64"},
-		// Linux x64
-		{OS: "linux", Arch: "x64", FileExt: "tar.gz", DownloadName: "linux", Classifier: "linux-x64"},
+	if a.config == nil {
+		return []platform.Platform{}
 	}
+
+	return a.config.GetConfiguredPlatforms()
 }
 
 // GetMaintainedVersions returns all non-EOL versions from endoflife API.
@@ -943,11 +938,6 @@ func (a *TemurinAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policyVer
 				// Update version info with policy data
 				version.IsSupported = policyVersion.Supported
 				version.IsRecommended = policyVersion.Recommended
-
-				// Update latest patch version from policy if specified
-				if policyVersion.LatestPatchVersion != "" {
-					version.LatestPatch = policyVersion.LatestPatchVersion
-				}
 
 				a.stdout.Debug("version approved by policy",
 					"version", version.Version,

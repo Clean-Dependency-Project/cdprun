@@ -202,7 +202,7 @@ func TestYarnAdapter_LoadAndApplyPolicy(t *testing.T) {
 	tempDir := t.TempDir()
 	policyPath := filepath.Join(tempDir, "yarn-policy.json")
 	content := `[
-		{"version":"1","supported":true,"recommended":true,"lts":false,"latest_patch_version":"1.22.22"},
+		{"version":"1","supported":true,"recommended":true,"lts":false},
 		{"version":"4","supported":false,"recommended":false,"lts":false}
 	]`
 	if err := os.WriteFile(policyPath, []byte(content), 0644); err != nil {
@@ -227,8 +227,8 @@ func TestYarnAdapter_LoadAndApplyPolicy(t *testing.T) {
 	if len(filtered) != 1 || filtered[0].Version != "1" {
 		t.Fatalf("ApplyPolicy() unexpected result = %+v", filtered)
 	}
-	if filtered[0].LatestPatch != "1.22.22" {
-		t.Fatalf("ApplyPolicy() latest_patch = %q, want %q", filtered[0].LatestPatch, "1.22.22")
+	if filtered[0].LatestPatch != "1.22.20" {
+		t.Fatalf("ApplyPolicy() latest_patch = %q, want %q", filtered[0].LatestPatch, "1.22.20")
 	}
 }
 

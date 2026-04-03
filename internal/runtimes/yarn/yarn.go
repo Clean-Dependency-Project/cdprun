@@ -337,9 +337,6 @@ func (a *YarnAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policyVersio
 		updated.IsSupported = policyVersion.Supported
 		updated.IsRecommended = policyVersion.Recommended
 		updated.IsLTS = policyVersion.LTS
-		if policyVersion.LatestPatchVersion != "" {
-			updated.LatestPatch = policyVersion.LatestPatchVersion
-		}
 
 		if policyVersion.Supported {
 			filtered = append(filtered, updated)

@@ -45,7 +45,6 @@ func (m *MockClient) GetSupportedVersions(ctx context.Context, runtime PolicyRun
 		if pv.Supported {
 			versions = append(versions, VersionInfo{
 				Version:       pv.Version,
-				LatestPatch:   pv.LatestPatchVersion,
 				IsSupported:   pv.Supported,
 				IsRecommended: pv.Recommended,
 				IsLTS:         pv.LTS,

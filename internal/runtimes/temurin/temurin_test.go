@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/clean-dependency-project/cdprun/internal/config"
 	"github.com/clean-dependency-project/cdprun/internal/endoflife"
 	"github.com/clean-dependency-project/cdprun/internal/gpg"
 	"github.com/clean-dependency-project/cdprun/internal/platform"
@@ -70,7 +71,6 @@ func createTestTemurinPolicyFile(t *testing.T) string {
 			"supported": true,
 			"recommended": true,
 			"lts": true,
-			"latest_patch_version": "21.0.1",
 			"under_review": false
 		},
 		{
@@ -78,7 +78,6 @@ func createTestTemurinPolicyFile(t *testing.T) string {
 			"supported": true,
 			"recommended": false,
 			"lts": true,
-			"latest_patch_version": "17.0.9",
 			"under_review": false
 		},
 		{
@@ -86,7 +85,6 @@ func createTestTemurinPolicyFile(t *testing.T) string {
 			"supported": true,
 			"recommended": false,
 			"lts": true,
-			"latest_patch_version": "11.0.21",
 			"under_review": false
 		}
 	]`
@@ -136,7 +134,15 @@ func TestTemurinAdapter_GetEndOfLifeProduct(t *testing.T) {
 }
 
 func TestTemurinAdapter_GetSupportedPlatforms(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	runtimeConfig := &config.Runtime{
+		SupportedArchitectures: []string{"x64", "aarch64"},
+		SupportedPlatforms: []config.PlatformConfig{
+			{OS: "windows", Arch: []string{"x64", "aarch64"}, FileExtension: "msi", DownloadName: "windows"},
+			{OS: "linux", Arch: []string{"x64", "aarch64"}, FileExtension: "tar.gz", DownloadName: "linux"},
+			{OS: "mac", Arch: []string{"x64", "aarch64"}, FileExtension: "pkg", DownloadName: "mac"},
+		},
+	}
+	adapter := NewAdapterWithConfig(&mockEndOfLifeClient{}, runtimeConfig, nil, slog.Default(), slog.Default())
 	platforms := adapter.GetSupportedPlatforms()
 
 	if len(platforms) == 0 {
@@ -147,6 +153,7 @@ func TestTemurinAdapter_GetSupportedPlatforms(t *testing.T) {
 	hasWindows := false
 	hasLinux := false
 	hasMac := false
+	hasLinuxAArch64 := false
 
 	for _, p := range platforms {
 		switch p.OS {
@@ -157,10 +164,17 @@ func TestTemurinAdapter_GetSupportedPlatforms(t *testing.T) {
 		case "mac": // Temurin uses "mac" not "darwin"
 			hasMac = true
 		}
+
+		if p.OS == "linux" && p.Arch == "aarch64" {
+			hasLinuxAArch64 = true
+		}
 	}
 
 	if !hasWindows || !hasLinux || !hasMac {
 		t.Errorf("GetSupportedPlatforms() missing expected platforms. Got: %v", platforms)
+	}
+	if !hasLinuxAArch64 {
+		t.Errorf("GetSupportedPlatforms() missing linux-aarch64. Got: %v", platforms)
 	}
 }
 
@@ -444,11 +458,13 @@ func TestTemurinAdapter_ApplyPolicy(t *testing.T) {
 	versions := []endoflife.VersionInfo{
 		{
 			Version:     "21.0.7+6-LTS",
+			LatestPatch: "21.0.7+6-LTS",
 			IsSupported: true, // Set as supported to pass validation
 			IsLTS:       true,
 		},
 		{
 			Version:     "17.0.15+6-LTS",
+			LatestPatch: "17.0.15+6-LTS",
 			IsSupported: true, // Set as supported to pass validation
 			IsLTS:       true,
 		},
@@ -480,6 +496,19 @@ func TestTemurinAdapter_ApplyPolicy(t *testing.T) {
 	// Should have the two supported versions
 	if len(filtered) < 2 {
 		t.Errorf("ApplyPolicy() returned %d versions, want at least 2", len(filtered))
+	}
+
+	for _, version := range filtered {
+		switch version.Version {
+		case "21.0.7+6-LTS":
+			if version.LatestPatch != "21.0.7+6-LTS" {
+				t.Errorf("ApplyPolicy() changed latest patch for %s: got %s", version.Version, version.LatestPatch)
+			}
+		case "17.0.15+6-LTS":
+			if version.LatestPatch != "17.0.15+6-LTS" {
+				t.Errorf("ApplyPolicy() changed latest patch for %s: got %s", version.Version, version.LatestPatch)
+			}
+		}
 	}
 }
 

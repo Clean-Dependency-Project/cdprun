@@ -96,15 +96,13 @@ func createTestNodeJSPolicyFile(t *testing.T) string {
 			"version": "20",
 			"supported": true,
 			"recommended": true,
-			"lts": true,
-			"latest_patch_version": "20.15.0"
+			"lts": true
 		},
 		{
 			"version": "18",
 			"supported": true,
 			"recommended": false,
-			"lts": true,
-			"latest_patch_version": "18.20.4"
+			"lts": true
 		}
 	]`
 
@@ -123,18 +121,12 @@ func createTestPolicyFileFromVersions(t *testing.T, policyVersions []endoflife.P
 	// Create a policy file content for Node.js based on the provided versions
 	policyContent := "["
 	for i, pv := range policyVersions {
-		latestPatch := pv.LatestPatchVersion
-		if latestPatch == "" {
-			latestPatch = pv.Version + ".15.0" // Default patch version
-		}
-
 		policyContent += fmt.Sprintf(`{
 			"version": "%s",
 			"supported": %t,
 			"recommended": %t,
-			"lts": %t,
-			"latest_patch_version": "%s"
-		}`, pv.Version, pv.Supported, pv.Recommended, pv.LTS, latestPatch)
+			"lts": %t
+		}`, pv.Version, pv.Supported, pv.Recommended, pv.LTS)
 
 		if i < len(policyVersions)-1 {
 			policyContent += ","
@@ -633,11 +625,11 @@ func TestNodeJSAdapter_ConstructDownloadURL(t *testing.T) {
 	adapter := NewAdapter(&mockEndOfLifeClient{}).(*NodeJSAdapter)
 
 	tests := []struct {
-		name            string
-		version         string
-		platform        platform.Platform
-		wantContains    string // Check if URL contains this substring instead of exact match
-		wantEmpty       bool
+		name         string
+		version      string
+		platform     platform.Platform
+		wantContains string // Check if URL contains this substring instead of exact match
+		wantEmpty    bool
 	}{
 		{
 			name:    "Linux x64",
@@ -1120,9 +1112,9 @@ func TestNodeJSVerificationStrategy_WithAuditFileCreation(t *testing.T) {
 
 	// Create a verification strategy
 	strategy := &NodeJSVerificationStrategy{
-		stdout:           nil,
-		stderr:           nil,
-		Logger:           nil,
+		stdout: nil,
+		stderr: nil,
+		Logger: nil,
 	}
 
 	result := createMockDownloadResult(t, tempDir)
@@ -1232,7 +1224,7 @@ func TestNewAdapterWithConfig(t *testing.T) {
 // Test NodeJSVerificationStrategy.RequiresAdditionalFiles
 func TestNodeJSVerificationStrategy_RequiresAdditionalFiles(t *testing.T) {
 	strategy := &NodeJSVerificationStrategy{}
-	
+
 	if !strategy.RequiresAdditionalFiles() {
 		t.Error("RequiresAdditionalFiles() should return true for Node.js")
 	}
@@ -1241,12 +1233,11 @@ func TestNodeJSVerificationStrategy_RequiresAdditionalFiles(t *testing.T) {
 // Test NodeJSVerificationStrategy.GetType
 func TestNodeJSVerificationStrategy_GetType(t *testing.T) {
 	strategy := &NodeJSVerificationStrategy{}
-	
+
 	if strategy.GetType() != "nodejs-checksum-gpg" {
 		t.Errorf("GetType() = %v, want 'nodejs-checksum-gpg'", strategy.GetType())
 	}
 }
-
 
 // Test verifyChecksum (via NodeJSVerificationStrategy.Verify)
 func TestVerifyChecksum(t *testing.T) {
