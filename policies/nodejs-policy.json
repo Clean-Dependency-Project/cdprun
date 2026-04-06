@@ -5,8 +5,8 @@
     "eol": "2028-04-30",
     "latestReleaseDate": "2025-05-06",
     "lts": false,
-    "recommended": false,
-    "supported": false,
+    "recommended": true,
+    "supported": true,
     "under_review": false
   },
   {
