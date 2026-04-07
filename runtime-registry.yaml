@@ -14,7 +14,7 @@ config:
    docker_platform: "linux/amd64"
 runtimes:
   python:
-    enabled: false
+    enabled: true
     name: "Python"
     description: "High-level programming language"
     endoflife_product: "python"
@@ -225,7 +225,7 @@ runtimes:
       upload_after_download: true                                # Upload immediately after download
       upload_after_verification: true                           # Upload after successful verification
   tomcat:
-    enabled: false
+    enabled: true
     name: "Apache Tomcat"
     description: "Apache Tomcat is an open source implementation of the Java Servlet, JavaServer Pages, Java Expression Language and Java WebSocket technologies"
     endoflife_product: "tomcat"
@@ -294,7 +294,7 @@ runtimes:
               shell: "/bin/sh"
               script: "sh /workspace/scripts/package/apk/test.sh"
   yarn:
-    enabled: false
+    enabled: true
     name: "Yarn Classic"
     description: "Yarn package manager classic distribution"
     endoflife_product: "yarn"
