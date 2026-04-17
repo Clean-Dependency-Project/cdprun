@@ -289,7 +289,7 @@ func (c *Config) Validate() error {
 // RuntimeSkipsPolicyFile reports runtimes that resolve versions from an upstream API and do not use policies/*.json.
 func RuntimeSkipsPolicyFile(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "vscode", "intellij_idea_ultimate":
+	case "vscode", "intellij_idea_ultimate", "pycharm_professional":
 		return true
 	default:
 		return false
@@ -299,7 +299,7 @@ func RuntimeSkipsPolicyFile(name string) bool {
 // RuntimeSkipsEndOfLifeProduct reports runtimes not indexed on endoflife.date; endoflife_product may be omitted.
 func RuntimeSkipsEndOfLifeProduct(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "intellij_idea_ultimate":
+	case "intellij_idea_ultimate", "pycharm_professional":
 		return true
 	default:
 		return false

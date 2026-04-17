@@ -351,6 +351,19 @@ func TestRuntime_Validate(t *testing.T) {
 			runtimeName: "intellij_idea_ultimate",
 			expectError: false,
 		},
+		{
+			name: "pycharm_professional skips endoflife.date and policy",
+			runtime: Runtime{
+				Enabled:          true,
+				EndOfLifeProduct: "",
+				PolicyFile:       "",
+				Verification: Verification{
+					Enabled: false,
+				},
+			},
+			runtimeName: "pycharm_professional",
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
