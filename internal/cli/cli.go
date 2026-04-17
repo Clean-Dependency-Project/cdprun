@@ -26,6 +26,7 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	intellijAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/intellij"
 	nodejsAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/nodejs"
+	pycharmAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/pycharm"
 	pythonAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/python"
 	temurinAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/temurin"
 	tomcatAdapter "github.com/clean-dependency-project/cdprun/internal/runtimes/tomcat"
@@ -95,7 +96,7 @@ func NewApp() *cli.App {
 					&cli.StringFlag{
 						Name:    "runtime",
 						Aliases: []string{"r"},
-						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode, intellij_idea_ultimate). If not specified, downloads all enabled runtimes from config",
+						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode, intellij_idea_ultimate, pycharm_professional). If not specified, downloads all enabled runtimes from config",
 					},
 					&cli.StringFlag{
 						Name:    "version",
@@ -638,6 +639,15 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 			adapter := intellijAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("intellij_idea_ultimate", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register intellij adapter: %w", err)
+			}
+			stdout.Info("registered runtime adapter",
+				"runtime", runtimeName,
+				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"policy_file", runtimeConfig.PolicyFile)
+		case "pycharm_professional":
+			adapter := pycharmAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
+			if err := registry.Register("pycharm_professional", adapter); err != nil {
+				return nil, nil, fmt.Errorf("failed to register pycharm adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,
