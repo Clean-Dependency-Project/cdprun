@@ -281,61 +281,6 @@ func (a *PythonAdapter) GetLatestVersion(ctx context.Context, opts runtime.Versi
 	return filtered[0], nil
 }
 
-// findLastVersionWithBinaries finds the last patch version that has Windows/macOS binary installers.
-// For security-only releases, Python stops publishing binary installers, so we need to find
-// the last version that had them by checking HEAD requests to python.org.
-// Returns the version string (e.g., "3.11.9") or empty string if none found.
-func (a *PythonAdapter) findLastVersionWithBinaries(ctx context.Context, majorMinor string, latestPatch string) string {
-	// Parse the patch number from latestPatch (e.g., "3.11.14" -> 14)
-	parts := strings.Split(latestPatch, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-
-	var patchNum int
-	if _, err := fmt.Sscanf(parts[2], "%d", &patchNum); err != nil {
-		return ""
-	}
-
-	// Get base URL
-	baseURL := "https://www.python.org/ftp/python"
-	if a.config != nil && a.config.Download.BaseURL != "" {
-		baseURL = a.config.Download.BaseURL
-	}
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// Search backwards from latest patch to find last version with Windows binary
-	for patch := patchNum; patch >= 0; patch-- {
-		testVersion := fmt.Sprintf("%s.%d", majorMinor, patch)
-		testURL := fmt.Sprintf("%s/%s/python-%s-amd64.exe", baseURL, testVersion, testVersion)
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodHead, testURL, nil)
-		if err != nil {
-			continue
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			continue
-		}
-		resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			a.stdout.Info("found last Python version with binaries",
-				"major_minor", majorMinor,
-				"version_with_binaries", testVersion,
-				"latest_patch", latestPatch)
-			return testVersion
-		}
-	}
-
-	return ""
-}
-
 // CreateDownloadTasks generates download tasks for the specified Python version and platforms.
 func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platforms []platform.Platform, outputDir string) ([]runtime.DownloadTask, error) {
 	// POLICY VALIDATION: Check if the version is supported or under_review before creating download tasks
@@ -355,22 +300,17 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 		platforms = a.GetSupportedPlatforms()
 	}
 
-	// For security-only releases, find the last version that has Windows/macOS binaries
-	var lastVersionWithBinaries string
+	// For security-only (EOAS) Python releases, upstream stops publishing the
+	// Windows .exe and macOS .pkg installers. We deliberately do NOT fall back
+	// to a previous patch's installer because that produced misleading entries
+	// in the published index (e.g., python-3.12.10-macos11.pkg listed under
+	// version 3.12.12). Linux is still built from source for the security
+	// patch, so only Windows/macOS are skipped.
 	if version.IsEOAS {
-		a.stdout.Info("processing security-only Python release",
+		a.stdout.Info("processing security-only Python release; skipping windows/mac binaries",
 			"version", version.Version,
 			"latest_patch", version.LatestPatch,
 			"is_eoas", version.IsEOAS)
-
-		// Find the last version that has Windows/macOS binary installers
-		lastVersionWithBinaries = a.findLastVersionWithBinaries(context.Background(), version.Version, version.LatestPatch)
-		if lastVersionWithBinaries != "" {
-			a.stdout.Info("will use last version with binaries for Windows/macOS",
-				"version", version.Version,
-				"binary_version", lastVersionWithBinaries,
-				"source_version", version.LatestPatch)
-		}
 	}
 
 	// Fix platform file extensions to match Python's specific requirements
@@ -409,15 +349,17 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 
 	// Create tasks for main binary/source files
 	for _, plat := range fixedPlatforms {
-		// Determine which version to use for this platform
-		downloadVersion := version.LatestPatch
-
-		// For security-only releases, use last version with binaries for Windows/macOS
-		if version.IsEOAS && lastVersionWithBinaries != "" {
-			if plat.OS == "windows" || plat.OS == "mac" {
-				downloadVersion = lastVersionWithBinaries
-			}
+		// Skip Windows/macOS for security-only releases: upstream does not
+		// publish installers for these patch versions and we will not
+		// substitute an older patch's installer.
+		if version.IsEOAS && (plat.OS == "windows" || plat.OS == "mac") {
+			a.stdout.Info("skipping platform for security-only Python release",
+				"platform_os", plat.OS,
+				"version", version.LatestPatch)
+			continue
 		}
+
+		downloadVersion := version.LatestPatch
 
 		url := a.constructDownloadURL(downloadVersion, plat)
 		if url == "" {
@@ -469,9 +411,8 @@ type platformVersion struct {
 	version string
 }
 
-// createVerificationTasksWithVersions creates download tasks for verification files
-// using specific versions per platform (needed for security-only releases where
-// Windows/macOS use an older version than Linux)
+// createVerificationTasksWithVersions creates download tasks for verification
+// files using the specific version recorded for each platform's main artifact.
 func (a *PythonAdapter) createVerificationTasksWithVersions(platformVersions []platformVersion, outputDir, userAgent string) []runtime.DownloadTask {
 	var tasks []runtime.DownloadTask
 
