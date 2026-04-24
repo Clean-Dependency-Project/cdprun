@@ -65,9 +65,17 @@ func LoadReleases(reader ReleaseReader) ([]ReleaseWithArtifacts, error) {
 	return result, nil
 }
 
-// filterArtifactsForVersion filters artifacts to only include those matching the specified version.
-// For security-only releases where binaries use older patch versions (e.g., 3.12.10 for version 3.12.12),
-// this function matches by major.minor prefix as a fallback.
+// filterArtifactsForVersion filters artifacts to only include those whose
+// filenames contain an exact match for the specified version.
+//
+// For aggregated security-only releases, upstream sometimes only ships a binary
+// for the latest patch in a minor line (e.g., python.org publishes
+// python-3.12.10-macos11.pkg as the macOS installer for the entire 3.12.x line).
+// We deliberately do NOT attach such binaries to other advertised patch
+// versions (e.g., 3.12.12), because doing so produced misleading entries like
+// `mac/python/3.12/3.12.12/python-3.12.10-macos11.pkg` with version "3.12.12".
+// If no binary in the release exactly matches the advertised version for a
+// platform, that platform is simply omitted from this version's entries.
 func filterArtifactsForVersion(artifacts storage.ReleaseArtifacts, version string) storage.ReleaseArtifacts {
 	filtered := storage.ReleaseArtifacts{
 		Platforms:   []storage.PlatformArtifact{},
@@ -75,80 +83,89 @@ func filterArtifactsForVersion(artifacts storage.ReleaseArtifacts, version strin
 		Metadata:    artifacts.Metadata,
 	}
 
-	// Extract major.minor from version for fallback matching
-	// e.g., "3.12.12" -> "3.12"
-	majorMinor := extractMajorMinor(version)
-
-	// Filter platform artifacts by version in filename
 	for _, platform := range artifacts.Platforms {
-		// Check if any artifact in this platform matches the version
 		hasMatchingArtifact := false
 
-		if platform.Binary != nil && matchesVersion(platform.Binary.Filename, version, majorMinor) {
+		if platform.Binary != nil && matchesVersion(platform.Binary.Filename, version) {
 			hasMatchingArtifact = true
 		}
-		if platform.Audit != nil && matchesVersion(platform.Audit.Filename, version, majorMinor) {
+		if platform.Audit != nil && matchesVersion(platform.Audit.Filename, version) {
 			hasMatchingArtifact = true
 		}
-		if platform.MetadataFile != nil && matchesVersion(platform.MetadataFile.Filename, version, majorMinor) {
+		if platform.MetadataFile != nil && matchesVersion(platform.MetadataFile.Filename, version) {
 			hasMatchingArtifact = true
 		}
 
-		if hasMatchingArtifact {
-			// Create a filtered copy of the platform with only matching artifacts
-			filteredPlatform := storage.PlatformArtifact{
-				Platform:     platform.Platform,
-				PlatformOS:   platform.PlatformOS,
-				PlatformArch: platform.PlatformArch,
-			}
-
-			if platform.Binary != nil && matchesVersion(platform.Binary.Filename, version, majorMinor) {
-				filteredPlatform.Binary = platform.Binary
-			}
-			if platform.Audit != nil && matchesVersion(platform.Audit.Filename, version, majorMinor) {
-				filteredPlatform.Audit = platform.Audit
-			}
-			if platform.Signature != nil && matchesVersion(platform.Signature.Filename, version, majorMinor) {
-				filteredPlatform.Signature = platform.Signature
-			}
-			if platform.Certificate != nil && matchesVersion(platform.Certificate.Filename, version, majorMinor) {
-				filteredPlatform.Certificate = platform.Certificate
-			}
-			if platform.MetadataFile != nil && matchesVersion(platform.MetadataFile.Filename, version, majorMinor) {
-				filteredPlatform.MetadataFile = platform.MetadataFile
-			}
-
-			filtered.Platforms = append(filtered.Platforms, filteredPlatform)
+		if !hasMatchingArtifact {
+			continue
 		}
+
+		filteredPlatform := storage.PlatformArtifact{
+			Platform:     platform.Platform,
+			PlatformOS:   platform.PlatformOS,
+			PlatformArch: platform.PlatformArch,
+		}
+
+		if platform.Binary != nil && matchesVersion(platform.Binary.Filename, version) {
+			filteredPlatform.Binary = platform.Binary
+		}
+		if platform.Audit != nil && matchesVersion(platform.Audit.Filename, version) {
+			filteredPlatform.Audit = platform.Audit
+		}
+		if platform.Signature != nil && matchesVersion(platform.Signature.Filename, version) {
+			filteredPlatform.Signature = platform.Signature
+		}
+		if platform.Certificate != nil && matchesVersion(platform.Certificate.Filename, version) {
+			filteredPlatform.Certificate = platform.Certificate
+		}
+		if platform.MetadataFile != nil && matchesVersion(platform.MetadataFile.Filename, version) {
+			filteredPlatform.MetadataFile = platform.MetadataFile
+		}
+
+		filtered.Platforms = append(filtered.Platforms, filteredPlatform)
 	}
 
 	return filtered
 }
 
-// extractMajorMinor extracts the major.minor portion from a semver version.
-// e.g., "3.12.12" -> "3.12", "22.15.0" -> "22.15"
-func extractMajorMinor(version string) string {
-	parts := strings.Split(version, ".")
-	if len(parts) >= 2 {
-		return parts[0] + "." + parts[1]
+// matchesVersion reports whether a filename advertises the given exact version.
+//
+// Matching is intentionally strict: only an exact substring match on the full
+// version string counts. We previously fell back to a major.minor prefix
+// match, but that caused mac/windows installers from one patch version to be
+// re-published under unrelated patch versions in the same security-only
+// aggregated release (see filterArtifactsForVersion for context).
+//
+// To avoid false positives such as filenames containing "3.12.123" matching
+// version "3.12.12", the version must be bounded on both sides by either a
+// non-digit character or the start/end of the filename.
+func matchesVersion(filename, version string) bool {
+	idx := 0
+	for {
+		i := strings.Index(filename[idx:], version)
+		if i < 0 {
+			return false
+		}
+		start := idx + i
+		end := start + len(version)
+		if !isVersionDigit(filename, start-1) && !isVersionDigit(filename, end) {
+			return true
+		}
+		idx = start + 1
+		if idx >= len(filename) {
+			return false
+		}
 	}
-	return version
 }
 
-// matchesVersion checks if a filename matches the given version.
-// First tries exact version match, then falls back to major.minor match.
-// This handles security-only releases where binaries use older patch versions.
-func matchesVersion(filename, version, majorMinor string) bool {
-	// First try exact version match
-	if strings.Contains(filename, version) {
-		return true
+// isVersionDigit reports whether the byte at position i in s is an ASCII digit.
+// Out-of-bounds positions return false (treated as a non-digit boundary).
+func isVersionDigit(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
 	}
-	// Fallback to major.minor match for security-only releases
-	// e.g., "python-3.12.10-amd64.exe" matches version "3.12.12" via "3.12"
-	if strings.Contains(filename, majorMinor+".") {
-		return true
-	}
-	return false
+	c := s[i]
+	return c >= '0' && c <= '9'
 }
 
 // ReleaseWithArtifacts combines a Release with its parsed artifacts.
