@@ -81,6 +81,14 @@ func TestPromoteTestedPackages_SuccessAndIdempotent(t *testing.T) {
 		t.Fatalf("unexpected promoted artifact: %+v", artifacts.Platforms[0].Binary)
 	}
 
+	// Verify RPM audit file is included in the platform artifact
+	if artifacts.Platforms[0].Audit == nil {
+		t.Fatal("RPM platform artifact has no Audit field set")
+	}
+	if artifacts.Platforms[0].Audit.Filename != "OSPO-nodejs-22.22.0-1.x86_64.rpm.audit.json" {
+		t.Fatalf("unexpected audit filename: %q, want %q", artifacts.Platforms[0].Audit.Filename, "OSPO-nodejs-22.22.0-1.x86_64.rpm.audit.json")
+	}
+
 	record, err := db.GetPackageRecord(
 		"nodejs", "22.22.0", "rpm", "linux", "x64", "in-sha-1", "OSPO-nodejs", "/export/apps/citools/OSPO-nodejs/22.22.0",
 	)

@@ -352,7 +352,7 @@ func toPlatformArtifact(target Target, result TestResult) (storage.PlatformArtif
 	}
 
 	platform := fmt.Sprintf("%s-%s-%s", target.InputPlatform, target.InputArch, strings.ToLower(strings.TrimSpace(target.Target)))
-	return storage.PlatformArtifact{
+	artifact := storage.PlatformArtifact{
 		Platform:     platform,
 		PlatformOS:   target.InputPlatform,
 		PlatformArch: target.InputArch,
@@ -363,5 +363,17 @@ func toPlatformArtifact(target Target, result TestResult) (storage.PlatformArtif
 			URL:        url,
 			UploadedAt: time.Now().UTC(),
 		},
-	}, nil
+	}
+
+	// Include audit file info for RPM packages (audit file is uploaded alongside the RPM)
+	if strings.ToLower(strings.TrimSpace(target.Target)) == "rpm" {
+		auditFilename := filename + ".audit.json"
+		artifact.Audit = &storage.AuditArtifact{
+			Filename:   auditFilename,
+			URL:        url + ".audit.json", // Same URL pattern as the RPM with .audit.json suffix
+			UploadedAt: time.Now().UTC(),
+		}
+	}
+
+	return artifact, nil
 }
