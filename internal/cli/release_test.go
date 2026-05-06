@@ -415,6 +415,24 @@ func TestGetFileInfo(t *testing.T) {
 			wantIsCommonFile: true,
 			wantType:         "package_test_results",
 		},
+		{
+			name:             "RPM package file",
+			filename:         "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm",
+			url:              "https://example.com/OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm",
+			wantIsCommonFile: false,
+			wantOS:           "linux",
+			wantArch:         "x64",
+			wantType:         "binary",
+		},
+		{
+			name:             "RPM package audit file",
+			filename:         "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json",
+			url:              "https://example.com/OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json",
+			wantIsCommonFile: false,
+			wantOS:           "linux",
+			wantArch:         "x64",
+			wantType:         "artifact",
+		},
 	}
 
 	for _, tt := range tests {
@@ -663,6 +681,86 @@ func TestBuildArtifactsJSON(t *testing.T) {
 
 	if artifacts.Metadata.PlatformCount == 0 {
 		t.Error("metadata.PlatformCount is 0")
+	}
+}
+
+func TestBuildArtifactsJSON_RPMPackageWithAudit(t *testing.T) {
+	stdout := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	stderr := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
+	rm := &ReleaseManager{
+		db:     &mockDatabaseStore{},
+		github: &mockGitHubReleaser{},
+		stdout: stdout,
+		stderr: stderr,
+	}
+
+	// Test that RPM binary and RPM audit file are properly paired
+	uploadedArtifacts := map[string]artifactInfo{
+		"OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm": {
+			URL:              "https://github.com/owner/repo/releases/download/tag/OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm",
+			SHA256:           "7e8e74ea70d14f4cf1f405938349f225e1536263b970615bc7e4e73ba6f2d8d5",
+			OriginalFilename: "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm",
+		},
+		"OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json": {
+			URL:              "https://github.com/owner/repo/releases/download/tag/OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json",
+			SHA256:           "fc373ea7f1c925c286544bc026d092a3bfc782b7ef8a2bd7d7bfdc8397bb3c17",
+			OriginalFilename: "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json",
+		},
+	}
+
+	downloadResults := []runtime.DownloadResult{
+		{
+			LocalPath: "/tmp/node-v24.15.0-linux-x64.tar.xz",
+			FileSize:  31164460,
+			Platform: platform.Platform{
+				OS:   "linux",
+				Arch: "x64",
+			},
+		},
+	}
+
+	jsonStr, err := rm.buildArtifactsJSON(uploadedArtifacts, downloadResults)
+	if err != nil {
+		t.Fatalf("buildArtifactsJSON() error: %v", err)
+	}
+
+	if jsonStr == "" {
+		t.Fatal("buildArtifactsJSON() returned empty string")
+	}
+
+	// Verify it's valid JSON
+	var artifacts storage.ReleaseArtifacts
+	if err := json.Unmarshal([]byte(jsonStr), &artifacts); err != nil {
+		t.Fatalf("buildArtifactsJSON() produced invalid JSON: %v", err)
+	}
+
+	// Find the RPM platform
+	var rpmPlatform *storage.PlatformArtifact
+	for i := range artifacts.Platforms {
+		if artifacts.Platforms[i].Platform == "linux-x64" && artifacts.Platforms[i].Binary != nil &&
+			strings.HasSuffix(artifacts.Platforms[i].Binary.Filename, ".rpm") {
+			rpmPlatform = &artifacts.Platforms[i]
+			break
+		}
+	}
+
+	if rpmPlatform == nil {
+		t.Fatal("buildArtifactsJSON() did not create RPM platform artifact")
+	}
+
+	// Verify the binary is set
+	if rpmPlatform.Binary == nil {
+		t.Error("RPM platform has no Binary set")
+	} else if rpmPlatform.Binary.Filename != "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm" {
+		t.Errorf("RPM Binary.Filename = %q, want %q", rpmPlatform.Binary.Filename, "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm")
+	}
+
+	// Verify the audit is set - THIS IS THE KEY TEST FOR THE BUG
+	if rpmPlatform.Audit == nil {
+		t.Error("RPM platform has no Audit set - RPM audit file was not properly paired with RPM binary")
+	} else if rpmPlatform.Audit.Filename != "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json" {
+		t.Errorf("RPM Audit.Filename = %q, want %q", rpmPlatform.Audit.Filename, "OSPO-nodejs-24.15.0-1.amzn2023.x86_64.rpm.audit.json")
 	}
 }
 
