@@ -383,6 +383,12 @@ func (rm *ReleaseManager) collectPackageArtifacts(outputDir, runtimeName, versio
 		}
 		if packageArtifactFilename(filepath.Base(fullPath)) {
 			appendFile(fullPath, info)
+			if strings.HasSuffix(strings.ToLower(filepath.Base(fullPath)), ".rpm") {
+				auditPath := fullPath + ".audit.json"
+				if ainfo, aerr := os.Stat(auditPath); aerr == nil && !ainfo.IsDir() && ainfo.Size() > 0 {
+					appendFile(auditPath, ainfo)
+				}
+			}
 		}
 	}
 
@@ -854,6 +860,17 @@ func getFileInfo(filename, url string, downloadResults []runtime.DownloadResult)
 			OS:      "linux",
 			Arch:    packageArchFromFilename(filename),
 			Type:    "binary",
+		}, nil
+	}
+
+	// Sibling audit for an RPM (e.g. OSPO-nodejs-….rpm.audit.json) — same platform key as the .rpm binary.
+	if strings.HasSuffix(strings.ToLower(filename), ".rpm.audit.json") {
+		baseRPM := strings.TrimSuffix(filename, ".audit.json")
+		return &fileInfo{
+			Version: extractVersionFromFilename(baseRPM),
+			OS:      "linux",
+			Arch:    packageArchFromFilename(baseRPM),
+			Type:    "artifact",
 		}, nil
 	}
 

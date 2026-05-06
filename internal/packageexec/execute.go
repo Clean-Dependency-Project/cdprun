@@ -103,7 +103,40 @@ func TestBuiltPackages(ctx context.Context, runner packaging.CommandRunner, opts
 			continue
 		}
 
-		err := testOneInContainer(ctx, runner, normalized, buildRecord.Target, buildRecord.Build)
+		execSpec, execErr := normalized.Executors.Resolve(buildRecord.Target.Runtime, buildRecord.Target.Target)
+		if execErr != nil {
+			results.Results = append(results.Results, promotion.TestResult{
+				Runtime:         buildRecord.Target.Runtime,
+				Version:         buildRecord.Target.Version,
+				Target:          buildRecord.Target.Target,
+				InputSHA256:     buildRecord.Target.InputSHA256,
+				PackageName:     buildRecord.Target.PackageName,
+				InstallPrefix:   buildRecord.Target.InstallPrefix,
+				Passed:          false,
+				PackageFilename: buildRecord.Build.PackageFilename,
+				PackagePath:     buildRecord.Build.PackagePath,
+				PackageSHA256:   buildRecord.Build.PackageSHA256,
+			})
+			failed++
+			continue
+		}
+
+		testStdout, testStderr, testErr := testOneInContainer(ctx, runner, normalized, buildRecord.Target, buildRecord.Build, execSpec)
+		if strings.EqualFold(strings.TrimSpace(buildRecord.Target.Target), "rpm") {
+			if werr := WriteRPMAuditRecord(
+				normalized.WorkspaceDir,
+				runID,
+				buildRecord.Target,
+				buildRecord.Build,
+				execSpec,
+				testStdout,
+				testStderr,
+				testErr,
+			); werr != nil {
+				return results, fmt.Errorf("write rpm audit: %w", werr)
+			}
+		}
+
 		size := int64(0)
 		if absPath, statErr := resolvePath(normalized.WorkspaceDir, buildRecord.Build.PackagePath); statErr == nil {
 			if info, infoErr := os.Stat(absPath); infoErr == nil {
@@ -117,14 +150,14 @@ func TestBuiltPackages(ctx context.Context, runner packaging.CommandRunner, opts
 			InputSHA256:     buildRecord.Target.InputSHA256,
 			PackageName:     buildRecord.Target.PackageName,
 			InstallPrefix:   buildRecord.Target.InstallPrefix,
-			Passed:          err == nil,
+			Passed:          testErr == nil,
 			PackageFilename: buildRecord.Build.PackageFilename,
 			PackagePath:     buildRecord.Build.PackagePath,
 			PackageSHA256:   buildRecord.Build.PackageSHA256,
 			PackageSize:     size,
 		}
 		results.Results = append(results.Results, result)
-		if err != nil {
+		if testErr != nil {
 			failed++
 		}
 	}
@@ -191,16 +224,12 @@ func buildOneInContainer(ctx context.Context, runner packaging.CommandRunner, op
 	return build, nil
 }
 
-func testOneInContainer(ctx context.Context, runner packaging.CommandRunner, opts Options, target Target, build packaging.BuildResult) error {
+func testOneInContainer(ctx context.Context, runner packaging.CommandRunner, opts Options, target Target, build packaging.BuildResult, execSpec TargetExecutorSpec) (stdout string, stderr string, err error) {
 	packagePath, err := resolvePath(opts.WorkspaceDir, build.PackagePath)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
-	execSpec, err := opts.Executors.Resolve(target.Runtime, target.Target)
-	if err != nil {
-		return err
-	}
 	args := []string{
 		"run", "--rm", "--platform=" + opts.DockerPlatform,
 		"-v", opts.WorkspaceDir + ":/workspace",
@@ -211,11 +240,11 @@ func testOneInContainer(ctx context.Context, runner packaging.CommandRunner, opt
 		execSpec.Test.Image,
 		execSpec.Test.Shell, "-lc", execSpec.Test.Script,
 	)
-	_, stderr, runErr := runner.Run(ctx, "", "docker", args, nil)
+	stdout, stderr, runErr := runner.Run(ctx, "", "docker", args, nil)
 	if runErr != nil {
-		return fmt.Errorf("%s test failed: %w (stderr=%s)", target.Target, runErr, strings.TrimSpace(stderr))
+		return stdout, stderr, fmt.Errorf("%s test failed: %w (stderr=%s)", target.Target, runErr, strings.TrimSpace(stderr))
 	}
-	return nil
+	return stdout, stderr, nil
 }
 
 func buildEnvForTarget(opts Options, target Target) []string {
