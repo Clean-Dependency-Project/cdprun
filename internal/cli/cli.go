@@ -548,7 +548,12 @@ func packagePromote(c *cli.Context) error {
 			releaseTagsByRuntime[runtimeName] = tag
 		}
 	}
-	if err := UploadPromotionEvidenceFiles(uploader, releaseTagsByRuntime, testResultsPath); err != nil {
+	workspaceDir, wdErr := os.Getwd()
+	if wdErr != nil {
+		stderr.Warn("failed to resolve working directory for RPM audit upload", "error", wdErr)
+		workspaceDir = ""
+	}
+	if err := UploadPromotionEvidenceFiles(uploader, releaseTagsByRuntime, testResultsPath, workspaceDir); err != nil {
 		stderr.Error("failed to upload promotion evidence files", "error", err)
 		return err
 	}

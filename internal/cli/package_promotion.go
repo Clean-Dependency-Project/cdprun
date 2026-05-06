@@ -140,10 +140,18 @@ func BuildPromotionUploader(configPath, token string, manifest PackageManifest) 
 	return &runtimeReleaseUploader{clientsByRuntime: clientsByRuntime}, nil
 }
 
+// UploadPromotionEvidenceFiles uploads pipeline evidence files (manifests, results,
+// and sibling RPM audit JSONs) to each runtime's GitHub release.
+//
+// workspaceDir is used to resolve relative PackagePath values found inside the
+// test-results file when looking for sibling *.rpm.audit.json files.  Pass the
+// process working directory (os.Getwd()) from the caller; an empty string
+// disables relative-path resolution.
 func UploadPromotionEvidenceFiles(
 	uploader promotion.ReleaseAssetUploader,
 	releaseTagsByRuntime map[string]string,
 	testResultsPath string,
+	workspaceDir string,
 ) error {
 	if uploader == nil {
 		return nil
@@ -152,13 +160,17 @@ func UploadPromotionEvidenceFiles(
 		return nil
 	}
 
-	artifactsDir := filepath.Dir(strings.TrimSpace(testResultsPath))
+	cleanResultsPath := strings.TrimSpace(testResultsPath)
+	artifactsDir := filepath.Dir(cleanResultsPath)
 	evidenceFiles := []string{
-		strings.TrimSpace(testResultsPath),
+		cleanResultsPath,
 		filepath.Join(artifactsDir, "package-build-results.json"),
 		filepath.Join(artifactsDir, "package-manifest.built.json"),
 		filepath.Join(artifactsDir, "package-manifest.tested.json"),
 	}
+	// Append sibling *.rpm.audit.json files discovered from the test results.
+	evidenceFiles = append(evidenceFiles, rpmAuditPathsFromTestResults(workspaceDir, cleanResultsPath)...)
+
 	seen := make(map[string]struct{})
 	for _, runtimeName := range sortedRuntimeKeys(releaseTagsByRuntime) {
 		releaseTag := releaseTagsByRuntime[runtimeName]
@@ -187,6 +199,49 @@ func UploadPromotionEvidenceFiles(
 		}
 	}
 	return nil
+}
+
+// rpmAuditPathsFromTestResults reads testResultsPath and returns the absolute
+// paths of any sibling *.rpm.audit.json files that exist on disk alongside the
+// built RPM packages recorded as passed in the test results.
+func rpmAuditPathsFromTestResults(workspaceDir, testResultsPath string) []string {
+	if strings.TrimSpace(testResultsPath) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(testResultsPath)
+	if err != nil {
+		return nil
+	}
+	var results promotion.TestResultsFile
+	if err := json.Unmarshal(data, &results); err != nil {
+		return nil
+	}
+
+	var paths []string
+	seen := make(map[string]struct{})
+	for _, r := range results.Results {
+		if strings.ToLower(strings.TrimSpace(r.Target)) != "rpm" {
+			continue
+		}
+		pkgPath := strings.TrimSpace(r.PackagePath)
+		if pkgPath == "" {
+			continue
+		}
+		if !filepath.IsAbs(pkgPath) && strings.TrimSpace(workspaceDir) != "" {
+			pkgPath = filepath.Join(workspaceDir, pkgPath)
+		}
+		auditPath := pkgPath + ".audit.json"
+		if _, ok := seen[auditPath]; ok {
+			continue
+		}
+		seen[auditPath] = struct{}{}
+		info, statErr := os.Stat(auditPath)
+		if statErr != nil || info.IsDir() || info.Size() == 0 {
+			continue
+		}
+		paths = append(paths, auditPath)
+	}
+	return paths
 }
 
 func sortedRuntimeKeys(byRuntime map[string]string) []string {
