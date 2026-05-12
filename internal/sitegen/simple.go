@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
-	"github.com/clean-dependency-project/cdprun/internal/endoflife"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 	"log/slog"
 )
@@ -29,6 +28,21 @@ type SimpleArtifactEntry struct {
 	Audit       string `json:"audit,omitempty"`
 	Metadata    string `json:"metadata,omitempty"`
 	Version     string `json:"version"`
+}
+
+// UnsupportedEntry is a single item in the "unsupported" JSON key.
+// Kind distinguishes two roles:
+//
+//   - "line"     — the entire version line is EOL (e.g. version "3.9" covers all Python 3.9.x).
+//     Clients should block every artifact whose version starts with this prefix.
+//   - "artifact" — this specific version is present in the artifact store and is EOL.
+//     Clients should remove or quarantine that specific artifact.
+type UnsupportedEntry struct {
+	Version   string `json:"version"`
+	EOL       string `json:"eol,omitempty"`
+	Notes     string `json:"notes,omitempty"`
+	Supported bool   `json:"supported"` // always false
+	Kind      string `json:"kind"`       // "line" | "artifact"
 }
 
 func artifactTypeFromFilename(filename string) string {
@@ -269,10 +283,9 @@ func renderVersionPage(runtime RuntimeModel, major int, unsupported config.Unsup
 	// Render JSON index: artifact entries + unsupported list filtered to this major.
 	artifactIndex := collectArtifactIndexByMajor(runtime, major)
 	allUnsupported := expandUnsupportedVersions(runtime, unsupported)
-	var majorUnsupported []endoflife.PolicyVersion
+	majorUnsupported := []UnsupportedEntry{}
 	for _, pv := range allUnsupported {
-		parsed, _, _, err := storage.ParseSemver(pv.Version)
-		if err == nil && parsed == major {
+		if versionBelongsToMajor(pv.Version, major) {
 			majorUnsupported = append(majorUnsupported, pv)
 		}
 	}
@@ -524,7 +537,7 @@ func renderSimpleRootIndex(model *SiteModel, unsupported config.UnsupportedConfi
 	for k, v := range allIndex {
 		out[k] = v
 	}
-	unsupportedByRuntime := make(map[string][]endoflife.PolicyVersion, len(model.Runtimes))
+	unsupportedByRuntime := make(map[string][]UnsupportedEntry, len(model.Runtimes))
 	for _, rt := range model.Runtimes {
 		unsupportedByRuntime[rt.Name] = expandUnsupportedVersions(rt, unsupported)
 	}
@@ -610,47 +623,104 @@ func collectAllArtifactIndex(model *SiteModel) SimpleRootIndex {
 	return index
 }
 
+// versionBelongsToMajor reports whether version string v has the given major version.
+// Handles 1-component prefixes (e.g. "16"), 2-component (e.g. "3.9"), and full semver.
+func versionBelongsToMajor(v string, major int) bool {
+	parsedMajor, _, _, err := storage.ParseSemver(v)
+	if err == nil {
+		return parsedMajor == major
+	}
+	// Single-component prefix like "16"
+	var m int
+	if n, scanErr := fmt.Sscanf(v, "%d", &m); n == 1 && scanErr == nil {
+		return m == major
+	}
+	return false
+}
+
+// parseSemverFull parses any version string (1, 2, or 3 components) into a
+// comparable numeric tuple. Single-component strings like "8" or "16" return
+// (major, 0, 0). This is used by the sort in expandUnsupportedVersions so that
+// single-digit major prefixes ("8") sort correctly before double-digit ones ("10").
+func parseSemverFull(v string) (major, minor, patch int, err error) {
+	maj, min, pat, e := storage.ParseSemver(v)
+	if e == nil {
+		return maj, min, pat, nil
+	}
+	// Single-component (e.g. "8", "16")
+	var m int
+	if n, scanErr := fmt.Sscanf(v, "%d", &m); n == 1 && scanErr == nil {
+		return m, 0, 0, nil
+	}
+	return 0, 0, 0, fmt.Errorf("cannot parse version %q", v)
+}
+
 // expandUnsupportedVersions builds the list of concrete unsupported versions for a runtime
 // by walking every version present in the model and prefix-matching against unsupported rules.
+// For each rule that matches at least one DB version, the rule's prefix (e.g. "3.9", "16") is
+// also included so downstream clients can block the entire version line, not just the specific
+// patches present in this artifact store.
 // Duplicate concrete versions across platforms are deduplicated before matching.
-func expandUnsupportedVersions(rt RuntimeModel, uc config.UnsupportedConfig) []endoflife.PolicyVersion {
+// Always returns a non-nil slice so the JSON output is [] rather than null.
+func expandUnsupportedVersions(rt RuntimeModel, uc config.UnsupportedConfig) []UnsupportedEntry {
+	result := []UnsupportedEntry{}
 	if len(uc) == 0 {
-		return nil
+		return result
 	}
 
-	seen := make(map[string]struct{})
-	var result []endoflife.PolicyVersion
+	seenConcrete := make(map[string]struct{})
+	seenPrefix := make(map[string]struct{})
 
 	for _, platform := range rt.Platforms {
 		for _, version := range platform.Versions {
 			v := version.Version
-			if _, already := seen[v]; already {
+			if _, already := seenConcrete[v]; already {
 				continue
 			}
-			seen[v] = struct{}{}
+			seenConcrete[v] = struct{}{}
 
 			rule := uc.FindMatchingRule(rt.Name, v)
 			if rule == nil {
 				continue
 			}
 
-			pv := endoflife.PolicyVersion{
+			// Emit the rule prefix once (e.g. "3.9", "16") so clients can block
+			// the entire version line regardless of which patches they have installed.
+			if _, prefixSeen := seenPrefix[rule.Version]; !prefixSeen && rule.Version != v {
+				seenPrefix[rule.Version] = struct{}{}
+				entry := UnsupportedEntry{
+					Version:   rule.Version,
+					Supported: false,
+					Kind:      "line",
+				}
+				if rule.EOLDate != "" {
+					entry.EOL = rule.EOLDate
+				}
+				if rule.Reason != "" {
+					entry.Notes = rule.Reason
+				}
+				result = append(result, entry)
+			}
+
+			// Emit the concrete patch version (e.g. "3.9.25") present in the artifact store.
+			entry := UnsupportedEntry{
 				Version:   v,
 				Supported: false,
+				Kind:      "artifact",
 			}
 			if rule.EOLDate != "" {
-				pv.EOL = rule.EOLDate
+				entry.EOL = rule.EOLDate
 			}
 			if rule.Reason != "" {
-				pv.Notes = rule.Reason
+				entry.Notes = rule.Reason
 			}
-			result = append(result, pv)
+			result = append(result, entry)
 		}
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		iMaj, iMin, iPat, iErr := storage.ParseSemver(result[i].Version)
-		jMaj, jMin, jPat, jErr := storage.ParseSemver(result[j].Version)
+		iMaj, iMin, iPat, iErr := parseSemverFull(result[i].Version)
+		jMaj, jMin, jPat, jErr := parseSemverFull(result[j].Version)
 		if iErr != nil || jErr != nil {
 			return result[i].Version < result[j].Version
 		}

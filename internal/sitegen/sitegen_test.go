@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
-	"github.com/clean-dependency-project/cdprun/internal/endoflife"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
 
@@ -1474,7 +1473,7 @@ func TestRenderSimpleIndex_UnsupportedVersions(t *testing.T) {
 		t.Fatal("simple/index.json missing 'unsupported' key")
 	}
 
-	var unsupportedRoot map[string][]endoflife.PolicyVersion
+	var unsupportedRoot map[string][]UnsupportedEntry
 	if err := json.Unmarshal(unsupportedRootRaw, &unsupportedRoot); err != nil {
 		t.Fatalf("parse root unsupported map: %v", err)
 	}
@@ -1483,19 +1482,28 @@ func TestRenderSimpleIndex_UnsupportedVersions(t *testing.T) {
 	if !ok {
 		t.Fatal("root unsupported missing 'nodejs' key")
 	}
-	if len(nodejsUnsupported) != 1 {
-		t.Fatalf("root unsupported nodejs count = %d, want 1", len(nodejsUnsupported))
+	// Expect prefix "16" + concrete "16.20.2" = 2 entries
+	if len(nodejsUnsupported) != 2 {
+		t.Fatalf("root unsupported nodejs count = %d, want 2 (prefix + concrete)", len(nodejsUnsupported))
 	}
-	if nodejsUnsupported[0].Version != "16.20.2" {
-		t.Errorf("root unsupported nodejs[0].version = %q, want %q", nodejsUnsupported[0].Version, "16.20.2")
+	if nodejsUnsupported[0].Version != "16" {
+		t.Errorf("root unsupported nodejs[0].version = %q, want \"16\" (prefix)", nodejsUnsupported[0].Version)
 	}
-	if nodejsUnsupported[0].Supported {
-		t.Error("root unsupported nodejs[0].supported should be false")
+	if nodejsUnsupported[1].Version != "16.20.2" {
+		t.Errorf("root unsupported nodejs[1].version = %q, want \"16.20.2\" (concrete)", nodejsUnsupported[1].Version)
+	}
+	if nodejsUnsupported[0].Supported || nodejsUnsupported[1].Supported {
+		t.Error("root unsupported nodejs entries should have supported=false")
 	}
 	if nodejsUnsupported[0].EOL != "2023-09-11" {
 		t.Errorf("root unsupported nodejs[0].eol = %q, want %q", nodejsUnsupported[0].EOL, "2023-09-11")
 	}
-
+	if nodejsUnsupported[0].Kind != "line" {
+		t.Errorf("root unsupported nodejs[0].kind = %q, want \"line\"", nodejsUnsupported[0].Kind)
+	}
+	if nodejsUnsupported[1].Kind != "artifact" {
+		t.Errorf("root unsupported nodejs[1].kind = %q, want \"artifact\"", nodejsUnsupported[1].Kind)
+	}
 	// ── 2. Runtime simple/nodejs/index.json ───────────────────────────────────
 	rtContent, err := os.ReadFile(filepath.Join(tempDir, "simple", "nodejs", "index.json"))
 	if err != nil {
@@ -1512,16 +1520,20 @@ func TestRenderSimpleIndex_UnsupportedVersions(t *testing.T) {
 		t.Fatal("simple/nodejs/index.json missing 'unsupported' key")
 	}
 
-	var unsupportedRt []endoflife.PolicyVersion
+	var unsupportedRt []UnsupportedEntry
 	if err := json.Unmarshal(unsupportedRtRaw, &unsupportedRt); err != nil {
 		t.Fatalf("parse runtime unsupported list: %v", err)
 	}
 
-	if len(unsupportedRt) != 1 {
-		t.Fatalf("runtime unsupported count = %d, want 1", len(unsupportedRt))
+	// Expect prefix "16" + concrete "16.20.2" = 2 entries
+	if len(unsupportedRt) != 2 {
+		t.Fatalf("runtime unsupported count = %d, want 2 (prefix + concrete)", len(unsupportedRt))
 	}
-	if unsupportedRt[0].Version != "16.20.2" {
-		t.Errorf("runtime unsupported[0].version = %q, want %q", unsupportedRt[0].Version, "16.20.2")
+	if unsupportedRt[0].Version != "16" {
+		t.Errorf("runtime unsupported[0].version = %q, want \"16\" (prefix)", unsupportedRt[0].Version)
+	}
+	if unsupportedRt[1].Version != "16.20.2" {
+		t.Errorf("runtime unsupported[1].version = %q, want \"16.20.2\" (concrete)", unsupportedRt[1].Version)
 	}
 
 	// ── 3. Major-version simple/nodejs/v16/index.json ─────────────────────────
@@ -1540,16 +1552,20 @@ func TestRenderSimpleIndex_UnsupportedVersions(t *testing.T) {
 		t.Fatal("simple/nodejs/v16/index.json missing 'unsupported' key")
 	}
 
-	var unsupportedV16 []endoflife.PolicyVersion
+	var unsupportedV16 []UnsupportedEntry
 	if err := json.Unmarshal(unsupportedV16Raw, &unsupportedV16); err != nil {
 		t.Fatalf("parse v16 unsupported list: %v", err)
 	}
 
-	if len(unsupportedV16) != 1 {
-		t.Fatalf("v16 unsupported count = %d, want 1", len(unsupportedV16))
+	// Expect prefix "16" + concrete "16.20.2" = 2 entries
+	if len(unsupportedV16) != 2 {
+		t.Fatalf("v16 unsupported count = %d, want 2 (prefix + concrete)", len(unsupportedV16))
 	}
-	if unsupportedV16[0].Version != "16.20.2" {
-		t.Errorf("v16 unsupported[0].version = %q, want %q", unsupportedV16[0].Version, "16.20.2")
+	if unsupportedV16[0].Version != "16" {
+		t.Errorf("v16 unsupported[0].version = %q, want \"16\" (prefix)", unsupportedV16[0].Version)
+	}
+	if unsupportedV16[1].Version != "16.20.2" {
+		t.Errorf("v16 unsupported[1].version = %q, want \"16.20.2\" (concrete)", unsupportedV16[1].Version)
 	}
 
 	// ── 4. Supported version (v22) must NOT appear in its major-version unsupported list ─
@@ -1568,7 +1584,7 @@ func TestRenderSimpleIndex_UnsupportedVersions(t *testing.T) {
 		t.Fatal("simple/nodejs/v22/index.json missing 'unsupported' key")
 	}
 
-	var unsupportedV22 []endoflife.PolicyVersion
+	var unsupportedV22 []UnsupportedEntry
 	if err := json.Unmarshal(unsupportedV22Raw, &unsupportedV22); err != nil {
 		t.Fatalf("parse v22 unsupported list: %v", err)
 	}
@@ -1586,6 +1602,8 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 			{
 				OS: "linux",
 				Versions: []VersionModel{
+					{Version: "8.17.0", Major: 8},
+					{Version: "10.24.1", Major: 10},
 					{Version: "16.20.2", Major: 16},
 					{Version: "16.20.1", Major: 16},
 					{Version: "18.20.0", Major: 18},
@@ -1596,6 +1614,7 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 			{
 				OS: "windows",
 				Versions: []VersionModel{
+					{Version: "8.17.0", Major: 8},
 					{Version: "16.20.2", Major: 16},
 					{Version: "18.20.0", Major: 18},
 				},
@@ -1610,16 +1629,17 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 		wantNoDuplicate bool
 	}{
 		{
-			name:         "empty config returns nil",
+			name:         "empty config returns empty non-nil slice",
 			uc:           config.UnsupportedConfig{},
 			wantVersions: nil,
 		},
 		{
-			name: "prefix 16 expands to all 16.x.y versions without duplicates",
+			name: "prefix 16 includes prefix entry and all 16.x.y concrete versions without duplicates",
 			uc: config.UnsupportedConfig{
 				"nodejs": {{Version: "16", Reason: "EOL", EOLDate: "2023-09-11"}},
 			},
-			wantVersions:    []string{"16.20.1", "16.20.2"},
+			// prefix "16" + concrete "16.20.1", "16.20.2"
+			wantVersions:    []string{"16", "16.20.1", "16.20.2"},
 			wantNoDuplicate: true,
 		},
 		{
@@ -1631,14 +1651,27 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 					{Version: "22", Reason: "EOL"},
 				},
 			},
-			// 16.20.1, 16.20.2, 18.20.0, 22.15.0 — numeric order, not lexicographic
-			wantVersions: []string{"16.20.1", "16.20.2", "18.20.0", "22.15.0"},
+			// prefixes first, then concretes, all in numeric order
+			wantVersions: []string{"16", "16.20.1", "16.20.2", "18", "18.20.0", "22", "22.15.0"},
 		},
 		{
-			name: "exact version match",
+			name: "single-digit prefix sorts before double-digit prefix (key regression guard)",
+			uc: config.UnsupportedConfig{
+				"nodejs": {
+					{Version: "8", Reason: "EOL", EOLDate: "2019-12-31"},
+					{Version: "10", Reason: "EOL", EOLDate: "2021-04-30"},
+					{Version: "16", Reason: "EOL", EOLDate: "2023-09-11"},
+				},
+			},
+			// Lexicographic would give: "10","10.24.1","16","16.20.1","16.20.2","8","8.17.0"
+			// Correct numeric:         "8","8.17.0","10","10.24.1","16","16.20.1","16.20.2"
+			wantVersions: []string{"8", "8.17.0", "10", "10.24.1", "16", "16.20.1", "16.20.2"},
+		},		{
+			name: "exact version match emits only the concrete version (no prefix duplicate)",
 			uc: config.UnsupportedConfig{
 				"nodejs": {{Version: "18.20.0", Reason: "EOL", EOLDate: "2024-04-30"}},
 			},
+			// rule.Version == concrete version — no separate prefix entry
 			wantVersions: []string{"18.20.0"},
 		},
 		{
@@ -1650,7 +1683,7 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 			wantVersions: nil,
 		},
 		{
-			name: "unknown runtime returns nil",
+			name: "unknown runtime returns empty",
 			uc: config.UnsupportedConfig{
 				"temurin": {{Version: "16", Reason: "EOL"}},
 			},
@@ -1661,6 +1694,12 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := expandUnsupportedVersions(rt, tc.uc)
+
+			// expandUnsupportedVersions must never return nil — callers rely on []
+			// marshaling as JSON [] not null.
+			if got == nil {
+				t.Fatal("expandUnsupportedVersions returned nil; want non-nil slice (may be empty)")
+			}
 
 			if len(tc.wantVersions) == 0 {
 				if len(got) != 0 {
@@ -1693,10 +1732,13 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 				}
 			}
 
-			// Verify all returned entries have Supported=false.
+			// Verify all returned entries have Supported=false and a non-empty Kind.
 			for _, pv := range got {
 				if pv.Supported {
 					t.Errorf("version %q has Supported=true, want false", pv.Version)
+				}
+				if pv.Kind != "line" && pv.Kind != "artifact" {
+					t.Errorf("version %q has Kind=%q, want \"line\" or \"artifact\"", pv.Version, pv.Kind)
 				}
 			}
 		})
