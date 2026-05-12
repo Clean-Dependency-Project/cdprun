@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/clean-dependency-project/cdprun/internal/config"
+	"github.com/clean-dependency-project/cdprun/internal/endoflife"
+	"github.com/clean-dependency-project/cdprun/internal/storage"
 	"log/slog"
 )
 
@@ -60,11 +63,11 @@ type SimpleVersionIndex map[string][]SimpleArtifactEntry
 type SimpleRootIndex map[string][]SimpleArtifactEntry
 
 // RenderSimpleIndex generates hierarchical Simple index pages.
-func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) error {
+func RenderSimpleIndex(model *SiteModel, outDir string, unsupported config.UnsupportedConfig, logger *slog.Logger) error {
 	simpleDir := filepath.Join(outDir, "simple")
 
 	// Render /simple/index.html (list of runtimes)
-	if err := renderSimpleRootIndex(model, simpleDir, logger); err != nil {
+	if err := renderSimpleRootIndex(model, unsupported, simpleDir, logger); err != nil {
 		return fmt.Errorf("failed to render simple root index: %w", err)
 	}
 
@@ -73,7 +76,7 @@ func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) err
 
 	// Render pages for each runtime
 	for _, runtime := range model.Runtimes {
-		if err := renderSimpleRuntimePages(runtime, scriptsIndex, simpleDir, logger); err != nil {
+		if err := renderSimpleRuntimePages(runtime, scriptsIndex, unsupported, simpleDir, logger); err != nil {
 			return fmt.Errorf("failed to render pages for %s: %w", runtime.Name, err)
 		}
 	}
@@ -83,7 +86,7 @@ func RenderSimpleIndex(model *SiteModel, outDir string, logger *slog.Logger) err
 
 // renderSimpleRuntimePages renders /simple/<runtime>/index.html and version pages.
 // scriptsIndex is pre-collected across all runtimes so every runtime index includes it.
-func renderSimpleRuntimePages(runtime RuntimeModel, scriptsIndex []ScriptsArtifactEntry, simpleDir string, logger *slog.Logger) error {
+func renderSimpleRuntimePages(runtime RuntimeModel, scriptsIndex []ScriptsArtifactEntry, unsupported config.UnsupportedConfig, simpleDir string, logger *slog.Logger) error {
 	runtimeDir := filepath.Join(simpleDir, runtime.Name)
 
 	// Collect unique major versions
@@ -98,11 +101,12 @@ func renderSimpleRuntimePages(runtime RuntimeModel, scriptsIndex []ScriptsArtifa
 	// Every runtime gets a "scripts" key so consumers can discover scripts.zip
 	// regardless of which runtime index they query.
 	runtimeIndex := collectRuntimeArtifactIndex(runtime)
-	out := make(map[string]any, len(runtimeIndex)+1)
+	out := make(map[string]any, len(runtimeIndex)+2)
 	for k, v := range runtimeIndex {
 		out[k] = v
 	}
 	out["scripts"] = scriptsIndex
+	out["unsupported"] = expandUnsupportedVersions(runtime, unsupported)
 
 	jsonData, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -116,7 +120,7 @@ func renderSimpleRuntimePages(runtime RuntimeModel, scriptsIndex []ScriptsArtifa
 
 	// Render version pages for each major version
 	for _, major := range majorVersions {
-		if err := renderVersionPage(runtime, major, runtimeDir, logger); err != nil {
+		if err := renderVersionPage(runtime, major, unsupported, runtimeDir, logger); err != nil {
 			return err
 		}
 	}
@@ -196,7 +200,7 @@ func renderRuntimeIndex(runtimeName string, majors []int, runtimeDir string, log
 	buf.WriteString("</h1>\n\n")
 
 	for _, major := range majors {
-		buf.WriteString(fmt.Sprintf("<a href=\"v%d/\">v%d</a><br/>\n", major, major))
+		fmt.Fprintf(&buf, "<a href=\"v%d/\">v%d</a><br/>\n", major, major)
 	}
 
 	buf.WriteString("\n</body>\n</html>\n")
@@ -211,7 +215,7 @@ func renderRuntimeIndex(runtimeName string, majors []int, runtimeDir string, log
 }
 
 // renderVersionPage renders /simple/<runtime>/v<major>/index.html with all binaries.
-func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logger *slog.Logger) error {
+func renderVersionPage(runtime RuntimeModel, major int, unsupported config.UnsupportedConfig, runtimeDir string, logger *slog.Logger) error {
 	// Collect all distributions for this major version
 	distMap := make(map[string]DistributionModel)
 
@@ -236,9 +240,9 @@ func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logge
 	// Render HTML
 	var buf bytes.Buffer
 	buf.WriteString("<!DOCTYPE html>\n<html>\n<head><title>")
-	buf.WriteString(fmt.Sprintf("%s v%d", runtime.Name, major))
+	fmt.Fprintf(&buf, "%s v%d", runtime.Name, major)
 	buf.WriteString("</title></head>\n<body>\n<h1>")
-	buf.WriteString(fmt.Sprintf("%s v%d binaries", runtime.Name, major))
+	fmt.Fprintf(&buf, "%s v%d binaries", runtime.Name, major)
 	buf.WriteString("</h1>\n\n")
 
 	for _, dist := range distributions {
@@ -262,9 +266,24 @@ func renderVersionPage(runtime RuntimeModel, major int, runtimeDir string, logge
 		return fmt.Errorf("failed to write version page: %w", err)
 	}
 
-	// Also render JSON index for automation tooling (e.g., Nexus proxy discovery)
+	// Render JSON index: artifact entries + unsupported list filtered to this major.
 	artifactIndex := collectArtifactIndexByMajor(runtime, major)
-	jsonData, err := json.MarshalIndent(artifactIndex, "", "  ")
+	allUnsupported := expandUnsupportedVersions(runtime, unsupported)
+	var majorUnsupported []endoflife.PolicyVersion
+	for _, pv := range allUnsupported {
+		parsed, _, _, err := storage.ParseSemver(pv.Version)
+		if err == nil && parsed == major {
+			majorUnsupported = append(majorUnsupported, pv)
+		}
+	}
+
+	versionOut := make(map[string]any, len(artifactIndex)+1)
+	for k, v := range artifactIndex {
+		versionOut[k] = v
+	}
+	versionOut["unsupported"] = majorUnsupported
+
+	jsonData, err := json.MarshalIndent(versionOut, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize artifact index: %w", err)
 	}
@@ -475,7 +494,7 @@ func collectDistributionsFromVersion(version VersionModel, distMap map[string]Di
 }
 
 // renderSimpleRootIndex renders /simple/index.html listing all runtimes.
-func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logger) error {
+func renderSimpleRootIndex(model *SiteModel, unsupported config.UnsupportedConfig, simpleDir string, logger *slog.Logger) error {
 	// Extract runtime names
 	runtimeNames := make([]string, 0, len(model.Runtimes))
 	for _, runtime := range model.Runtimes {
@@ -488,7 +507,7 @@ func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logg
 	buf.WriteString("<!DOCTYPE html>\n<html>\n<head><title>Simple Index</title></head>\n<body>\n<h1>Available Runtimes</h1>\n\n")
 
 	for _, name := range runtimeNames {
-		buf.WriteString(fmt.Sprintf("<a href=\"%s/\">%s</a><br/>\n", name, name))
+		fmt.Fprintf(&buf, "<a href=\"%s/\">%s</a><br/>\n", name, name)
 	}
 
 	buf.WriteString("\n</body>\n</html>\n")
@@ -498,9 +517,20 @@ func renderSimpleRootIndex(model *SiteModel, simpleDir string, logger *slog.Logg
 		return fmt.Errorf("failed to write simple root index: %w", err)
 	}
 
-	// Also render consolidated JSON index with all artifact paths across all runtimes
+	// Render consolidated JSON index: all artifact paths keyed by OS, plus
+	// an "unsupported" key mapping runtime name → []PolicyVersion.
 	allIndex := collectAllArtifactIndex(model)
-	jsonData, err := json.MarshalIndent(allIndex, "", "  ")
+	out := make(map[string]any, len(allIndex)+1)
+	for k, v := range allIndex {
+		out[k] = v
+	}
+	unsupportedByRuntime := make(map[string][]endoflife.PolicyVersion, len(model.Runtimes))
+	for _, rt := range model.Runtimes {
+		unsupportedByRuntime[rt.Name] = expandUnsupportedVersions(rt, unsupported)
+	}
+	out["unsupported"] = unsupportedByRuntime
+
+	jsonData, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize consolidated artifact index: %w", err)
 	}
@@ -578,4 +608,59 @@ func collectAllArtifactIndex(model *SiteModel) SimpleRootIndex {
 	}
 
 	return index
+}
+
+// expandUnsupportedVersions builds the list of concrete unsupported versions for a runtime
+// by walking every version present in the model and prefix-matching against unsupported rules.
+// Duplicate concrete versions across platforms are deduplicated before matching.
+func expandUnsupportedVersions(rt RuntimeModel, uc config.UnsupportedConfig) []endoflife.PolicyVersion {
+	if len(uc) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var result []endoflife.PolicyVersion
+
+	for _, platform := range rt.Platforms {
+		for _, version := range platform.Versions {
+			v := version.Version
+			if _, already := seen[v]; already {
+				continue
+			}
+			seen[v] = struct{}{}
+
+			rule := uc.FindMatchingRule(rt.Name, v)
+			if rule == nil {
+				continue
+			}
+
+			pv := endoflife.PolicyVersion{
+				Version:   v,
+				Supported: false,
+			}
+			if rule.EOLDate != "" {
+				pv.EOL = rule.EOLDate
+			}
+			if rule.Reason != "" {
+				pv.Notes = rule.Reason
+			}
+			result = append(result, pv)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		iMaj, iMin, iPat, iErr := storage.ParseSemver(result[i].Version)
+		jMaj, jMin, jPat, jErr := storage.ParseSemver(result[j].Version)
+		if iErr != nil || jErr != nil {
+			return result[i].Version < result[j].Version
+		}
+		if iMaj != jMaj {
+			return iMaj < jMaj
+		}
+		if iMin != jMin {
+			return iMin < jMin
+		}
+		return iPat < jPat
+	})
+	return result
 }

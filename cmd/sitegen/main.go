@@ -9,6 +9,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	appcli "github.com/clean-dependency-project/cdprun/internal/cli"
+	"github.com/clean-dependency-project/cdprun/internal/config"
 	"github.com/clean-dependency-project/cdprun/internal/sitegen"
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
@@ -40,6 +41,11 @@ func main() {
 				Usage:   "log level (debug, info, warn, error)",
 				EnvVars: []string{"SITEGEN_LOG_LEVEL"},
 			},
+			&cli.StringFlag{
+				Name:    "unsupported-file",
+				Usage:   "path to YAML/JSON file listing unsupported runtime version prefixes (overrides registry config)",
+				EnvVars: []string{"SITEGEN_UNSUPPORTED_FILE"},
+			},
 		},
 		Action: runSitegen,
 	}
@@ -70,13 +76,21 @@ func runSitegen(c *cli.Context) error {
 		}
 	}()
 
+	// Resolve unsupported-versions file: flag overrides, else empty (no filtering).
+	unsupportedFile := c.String("unsupported-file")
+	unsupportedCfg, err := config.LoadUnsupportedConfig(unsupportedFile)
+	if err != nil {
+		return err
+	}
+
 	// Create generator
 	generator := sitegen.NewGenerator(db, stdout)
 
 	// Generate site
 	opts := sitegen.GenerateOptions{
-		OutputDir: c.String("out"),
-		DryRun:    c.Bool("dry-run"),
+		OutputDir:           c.String("out"),
+		DryRun:              c.Bool("dry-run"),
+		UnsupportedVersions: unsupportedCfg,
 	}
 
 	if err := generator.Generate(context.Background(), opts); err != nil {
