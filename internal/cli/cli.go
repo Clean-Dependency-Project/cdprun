@@ -155,6 +155,11 @@ func NewApp() *cli.App {
 						Name:  "dry-run",
 						Usage: "validate without writing files",
 					},
+					&cli.StringFlag{
+						Name:    "unsupported-file",
+						Usage:   "path to YAML/JSON file listing unsupported runtime version prefixes (overrides registry config)",
+						EnvVars: []string{"SITEGEN_UNSUPPORTED_FILE"},
+					},
 				},
 				Action: sitegenCommand,
 			},
@@ -955,6 +960,23 @@ func downloadSingleRuntime(c *cli.Context, manager *runtime.Manager, cfg *config
 		}
 	}
 
+	// Load unsupported-versions configuration if specified.
+	unsupportedCfg, unsuppErr := config.LoadUnsupportedConfig(cfg.Config.UnsupportedFile)
+	if unsuppErr != nil {
+		stderr.Warn("failed to load unsupported versions config", "unsupported_file", cfg.Config.UnsupportedFile, "error", unsuppErr)
+		unsupportedCfg = config.UnsupportedConfig{}
+	} else {
+		ruleCount := 0
+		for _, rules := range unsupportedCfg {
+			ruleCount += len(rules)
+		}
+		stdout.Debug("loaded unsupported versions config", "unsupported_file", cfg.Config.UnsupportedFile, "rule_count", ruleCount)
+	}
+
+	// For batch path (no explicit --version): skip versions marked unsupported.
+	// For explicit --version path: warn but still proceed (user intent override).
+	versionsToDownload = applyUnsupportedFilter(runtimeName, version, versionsToDownload, unsupportedCfg, stderr)
+
 	// Download all versions
 	var allResults []DownloadResult
 	totalSuccess := 0
@@ -1220,19 +1242,33 @@ func sitegenCommand(c *cli.Context) error {
 	logLevel := ParseLogLevelOrDefault(c.String("log-level"))
 	stdout, stderr := NewLoggers(logLevel)
 
-	// Determine database path
+	// Always load the registry config so we can read UnsupportedFile even when --db is supplied.
+	configPath := c.String("config")
+	cfg, cfgErr := config.LoadConfig(configPath)
+
+	// Determine database path: flag takes precedence, then registry config.
 	dbPath := c.String("db")
 	if dbPath == "" {
-		// Try to get from config
-		configPath := c.String("config")
-		cfg, err := config.LoadConfig(configPath)
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
+		if cfgErr != nil {
+			return fmt.Errorf("failed to load config: %w", cfgErr)
 		}
 		dbPath = cfg.Config.Storage.DatabasePath
 		if dbPath == "" {
 			return fmt.Errorf("database path not specified and not found in config")
 		}
+	}
+
+	// Resolve unsupported-versions file: --unsupported-file flag overrides, then registry config.
+	unsupportedFile := c.String("unsupported-file")
+	if unsupportedFile == "" && cfgErr == nil {
+		unsupportedFile = cfg.Config.UnsupportedFile
+	}
+	unsupportedCfg, err := config.LoadUnsupportedConfig(unsupportedFile)
+	if err != nil {
+		return fmt.Errorf("failed to load unsupported versions config: %w", err)
+	}
+	if unsupportedFile != "" {
+		stdout.Info("loaded unsupported versions config", "file", unsupportedFile, "runtimes", len(unsupportedCfg))
 	}
 
 	// Open database
@@ -1254,8 +1290,9 @@ func sitegenCommand(c *cli.Context) error {
 
 	// Generate site
 	opts := sitegen.GenerateOptions{
-		OutputDir: outputDir,
-		DryRun:    dryRun,
+		OutputDir:           outputDir,
+		DryRun:              dryRun,
+		UnsupportedVersions: unsupportedCfg,
 	}
 
 	if err := generator.Generate(c.Context, opts); err != nil {
@@ -1264,4 +1301,57 @@ func sitegenCommand(c *cli.Context) error {
 
 	stdout.Info("site generation completed successfully")
 	return nil
+}
+
+// applyUnsupportedFilter applies the unsupported-versions policy to versionsToDownload.
+//
+// Batch mode (requestedVersion == ""): versions whose LatestPatch matches a rule are
+// removed from the list and a structured Warn is emitted for each one.
+//
+// Explicit mode (requestedVersion != ""): versions are kept but a Warn is still emitted
+// so operators are informed; the user knowingly requested an unsupported version.
+func applyUnsupportedFilter(
+	runtimeName, requestedVersion string,
+	versions []runtime.VersionInfo,
+	uc config.UnsupportedConfig,
+	logger *slog.Logger,
+) []runtime.VersionInfo {
+	if len(uc) == 0 {
+		return versions
+	}
+	if requestedVersion != "" {
+		// Explicit: warn only.
+		for _, vi := range versions {
+			if uc.IsVersionUnsupported(runtimeName, vi.LatestPatch) {
+				rule := uc.FindMatchingRule(runtimeName, vi.LatestPatch)
+				eolDate := ""
+				if rule != nil {
+					eolDate = rule.EOLDate
+				}
+				logger.Warn("downloading explicitly requested version that is unsupported",
+					"runtime", runtimeName,
+					"version", vi.LatestPatch,
+					"eol_date", eolDate)
+			}
+		}
+		return versions
+	}
+	// Batch: skip unsupported.
+	kept := versions[:0:0]
+	for _, vi := range versions {
+		if uc.IsVersionUnsupported(runtimeName, vi.LatestPatch) {
+			rule := uc.FindMatchingRule(runtimeName, vi.LatestPatch)
+			eolDate := ""
+			if rule != nil {
+				eolDate = rule.EOLDate
+			}
+			logger.Warn("skipping unsupported version",
+				"runtime", runtimeName,
+				"version", vi.LatestPatch,
+				"eol_date", eolDate)
+			continue
+		}
+		kept = append(kept, vi)
+	}
+	return kept
 }

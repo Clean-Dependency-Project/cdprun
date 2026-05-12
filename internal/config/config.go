@@ -52,7 +52,8 @@ type GlobalConfig struct {
 	DownloadTimeout          string                   `yaml:"download_timeout"`
 	AutoDownloadAllPlatforms bool                     `yaml:"auto_download_all_platforms"`
 	Storage                  StorageConfig            `yaml:"storage"`
-	IgnoreFile               string                   `yaml:"ignore_file"` // Path to JSON file listing versions to ignore per runtime
+	IgnoreFile               string                   `yaml:"ignore_file"`        // Path to file listing platform-specific versions to ignore
+	UnsupportedFile          string                   `yaml:"unsupported_file"`   // Path to file listing unsupported runtime version prefixes
 	PackagingExecution       PackagingExecutionConfig `yaml:"packaging_execution"`
 }
 

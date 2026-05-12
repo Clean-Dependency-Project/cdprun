@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/clean-dependency-project/cdprun/internal/config"
 	"log/slog"
 )
 
@@ -25,8 +26,9 @@ func NewGenerator(reader ReleaseReader, logger *slog.Logger) *Generator {
 
 // GenerateOptions contains options for site generation.
 type GenerateOptions struct {
-	OutputDir string
-	DryRun    bool
+	OutputDir           string
+	DryRun              bool
+	UnsupportedVersions config.UnsupportedConfig
 }
 
 // Generate generates the complete static site from the database.
@@ -76,7 +78,7 @@ func (g *Generator) Generate(ctx context.Context, opts GenerateOptions) error {
 
 	// Render PEP 503 Simple index
 	if !opts.DryRun {
-		if err := RenderSimpleIndex(model, opts.OutputDir, g.logger); err != nil {
+		if err := RenderSimpleIndex(model, opts.OutputDir, opts.UnsupportedVersions, g.logger); err != nil {
 			return fmt.Errorf("failed to render simple index: %w", err)
 		}
 		g.logger.Info("rendered PEP 503 Simple index")
@@ -85,4 +87,3 @@ func (g *Generator) Generate(ctx context.Context, opts GenerateOptions) error {
 	g.logger.Info("site generation completed successfully")
 	return nil
 }
-

@@ -35,16 +35,22 @@ func NewAdapterWithConfig(cfg *config.Runtime, globalCfg *config.GlobalConfig, s
 }
 
 // setExpectedSHA256 remains for package-level tests.
+//
+//nolint:unused
 func (a *Adapter) setExpectedSHA256(classifier, hash string) {
 	a.SetExpectedSHA256(classifier, hash)
 }
 
 // expectedSHA256 remains for package-level tests.
+//
+//nolint:unused
 func (a *Adapter) expectedSHA256(classifier string) string {
 	return a.ExpectedSHA256(classifier)
 }
 
 // parseChecksumLine remains for package-level tests.
+//
+//nolint:unused
 func parseChecksumLine(body string) (string, error) {
 	return jetbrains.ParseChecksumLine(body)
 }

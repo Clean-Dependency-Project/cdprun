@@ -157,7 +157,9 @@ jobs:
       - name: Generate static site
         run: |
           set -e  # Exit on error
-          ./bin/cdprun --log-level debug sitegen --db downloads.db --out _site
+          ./bin/cdprun --config runtime-registry.yaml --log-level debug sitegen \
+            --db downloads.db \
+            --out _site
           echo "Site generation completed with exit code: $?"
 
       - name: Verify site generation
