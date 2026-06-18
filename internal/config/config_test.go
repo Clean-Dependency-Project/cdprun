@@ -352,7 +352,7 @@ func TestRuntime_Validate(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "pycharm_professional skips endoflife.date and policy",
+			name: "pycharm skips endoflife.date and policy",
 			runtime: Runtime{
 				Enabled:          true,
 				EndOfLifeProduct: "",
@@ -361,7 +361,7 @@ func TestRuntime_Validate(t *testing.T) {
 					Enabled: false,
 				},
 			},
-			runtimeName: "pycharm_professional",
+			runtimeName: "pycharm",
 			expectError: false,
 		},
 	}

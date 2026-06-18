@@ -53,6 +53,9 @@ runtimes:
         gpg:
           enabled: true
           signature_pattern: ".asc"
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
     endoflife:
       product_name: "python"
       check_eol: true
@@ -126,6 +129,9 @@ runtimes:
        gpg:
          enabled: true
          signature_pattern: "SHASUMS256.txt.asc"
+       clamav:
+         enabled: true
+         image: "clamav/clamav-debian:latest"
    endoflife:
      product_name: "nodejs"
      check_eol: true
@@ -197,6 +203,9 @@ runtimes:
         gpg:
           enabled: true
           signature_pattern: "*.sig"
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
       audit_logging:
         enabled: true
         output_dir: "./verification-logs"
@@ -260,6 +269,9 @@ runtimes:
         gpg:
           enabled: true
           signature_pattern: ".asc"
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
     endoflife:
       product_name: "tomcat"
       check_eol: true
@@ -332,6 +344,9 @@ runtimes:
         gpg:
           enabled: true
           signature_pattern: ".asc"
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
     endoflife:
       product_name: "yarn"
       check_eol: true
@@ -401,6 +416,9 @@ runtimes:
         gpg:
           enabled: false
           signature_pattern: ""
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
     endoflife:
       product_name: "vscode"
       check_eol: false
@@ -455,6 +473,9 @@ runtimes:
         gpg:
           enabled: false
           signature_pattern: ""
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
     endoflife:
       product_name: ""
       check_eol: false
@@ -468,10 +489,10 @@ runtimes:
       enabled: false
       targets: []
 
-  pycharm_professional:
+  pycharm:
     enabled: true
-    name: "PyCharm Professional"
-    description: "PyCharm Professional (PCP) — versions from JetBrains releases API only; not on endoflife.date"
+    name: "PyCharm"
+    description: "PyCharm (PCP) — unified product; versions from JetBrains releases API only; not on endoflife.date"
     endoflife_product: ""
     policy_file: ""
     version_pattern: "major"
@@ -509,6 +530,9 @@ runtimes:
         gpg:
           enabled: false
           signature_pattern: ""
+        clamav:
+          enabled: true
+          image: "clamav/clamav-debian:latest"
     endoflife:
       product_name: ""
       check_eol: false
@@ -517,7 +541,7 @@ runtimes:
       auto_release: true
       github_repository: "Clean-Dependency-Project/cdprun"
       draft_release: false
-      release_name_template: "PyCharm Professional - {version}"
+      release_name_template: "PyCharm - {version}"
     packaging:
       enabled: false
       targets: []
