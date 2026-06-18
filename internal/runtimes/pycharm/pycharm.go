@@ -1,4 +1,4 @@
-// Package pycharm provides a PyCharm Professional runtime adapter using shared JetBrains runtime logic.
+// Package pycharm provides a unified PyCharm runtime adapter using shared JetBrains runtime logic.
 package pycharm
 
 import (
@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	// PyCharmProfessionalRuntime is the registry key for PyCharm Professional (PCP).
-	PyCharmProfessionalRuntime = "pycharm_professional"
-	defaultProductCode         = "PCP"
+	// PyCharmRuntime is the registry key for the unified PyCharm product (PCP).
+	PyCharmRuntime     = "pycharm"
+	defaultProductCode = "PCP"
 )
 
 // Adapter is a thin PyCharm wrapper around the shared JetBrains adapter.
@@ -20,16 +20,16 @@ type Adapter struct {
 	*jetbrains.Adapter
 }
 
-// NewAdapterWithConfig builds a PyCharm Professional adapter.
+// NewAdapterWithConfig builds a unified PyCharm adapter.
 func NewAdapterWithConfig(cfg *config.Runtime, globalCfg *config.GlobalConfig, stdout, stderr *slog.Logger) runtime.RuntimeProvider {
 	return &Adapter{
 		Adapter: jetbrains.NewAdapterWithConfig(cfg, globalCfg, jetbrains.ProductOptions{
-			RuntimeName:        PyCharmProfessionalRuntime,
+			RuntimeName:        PyCharmRuntime,
 			DefaultProductCode: defaultProductCode,
 			DefaultReleaseType: "release",
 			DefaultReleasesURL: "https://data.services.jetbrains.com/products/releases",
 			DefaultUserAgent:   "cdprun/1.0 (PyCharm)",
-			ArtifactPrefix:     "pycharm-professional",
+			ArtifactPrefix:     "pycharm",
 		}, stdout, stderr),
 	}
 }

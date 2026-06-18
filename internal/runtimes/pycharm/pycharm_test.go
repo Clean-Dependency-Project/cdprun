@@ -89,8 +89,8 @@ func TestAdapter_GetLatestVersion(t *testing.T) {
 	if latest.LatestPatch != "2099.1.1" {
 		t.Fatalf("LatestPatch = %s, want 2099.1.1", latest.LatestPatch)
 	}
-	if latest.RuntimeName != PyCharmProfessionalRuntime {
-		t.Fatalf("RuntimeName = %s, want %s", latest.RuntimeName, PyCharmProfessionalRuntime)
+	if latest.RuntimeName != PyCharmRuntime {
+		t.Fatalf("RuntimeName = %s, want %s", latest.RuntimeName, PyCharmRuntime)
 	}
 }
 

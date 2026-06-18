@@ -96,7 +96,7 @@ func NewApp() *cli.App {
 					&cli.StringFlag{
 						Name:    "runtime",
 						Aliases: []string{"r"},
-						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode, intellij_idea_ultimate, pycharm_professional). If not specified, downloads all enabled runtimes from config",
+						Usage:   "runtime name (nodejs, python, tomcat, yarn, temurin, vscode, intellij_idea_ultimate, pycharm). If not specified, downloads all enabled runtimes from config",
 					},
 					&cli.StringFlag{
 						Name:    "version",
@@ -654,9 +654,9 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 				"runtime", runtimeName,
 				"endoflife_product", runtimeConfig.EndOfLifeProduct,
 				"policy_file", runtimeConfig.PolicyFile)
-		case "pycharm_professional":
+		case "pycharm":
 			adapter := pycharmAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
-			if err := registry.Register("pycharm_professional", adapter); err != nil {
+			if err := registry.Register("pycharm", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register pycharm adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
