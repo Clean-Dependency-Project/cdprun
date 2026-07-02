@@ -5,19 +5,16 @@ package python
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
 	"github.com/clean-dependency-project/cdprun/internal/endoflife"
-	"github.com/clean-dependency-project/cdprun/internal/gpg"
 	"github.com/clean-dependency-project/cdprun/internal/platform"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
 	"github.com/clean-dependency-project/cdprun/internal/version"
@@ -26,9 +23,6 @@ import (
 const (
 	Python = "python"
 )
-
-//go:embed keys
-var embeddedKeysFS embed.FS
 
 // PythonRelease represents a Python release from the endoflife API
 type PythonRelease struct {
@@ -397,12 +391,11 @@ func (a *PythonAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 
 // shouldDownloadVerificationFiles determines if verification files should be downloaded based on config
 func (a *PythonAdapter) shouldDownloadVerificationFiles() bool {
-	// Enable GPG verification for Python - we have embedded keys available
-	if a.config != nil && a.config.Verification.Methods.GPG.Enabled {
-		return true
+	if a.config == nil {
+		return true // Default to enabled if no config specified
 	}
-	// Default to enabled if no config specified (use embedded keys)
-	return true
+	// Sigstore takes precedence over GPG; either method needs sidecar files.
+	return a.config.SigstoreEnabled() || a.config.GPGEnabled()
 }
 
 // platformVersion pairs a platform with its specific version for verification tasks
@@ -413,48 +406,49 @@ type platformVersion struct {
 
 // createVerificationTasksWithVersions creates download tasks for verification
 // files using the specific version recorded for each platform's main artifact.
+// Sigstore takes precedence over GPG: when enabled, .sigstore sidecars are
+// downloaded and .asc tasks are suppressed entirely.
 func (a *PythonAdapter) createVerificationTasksWithVersions(platformVersions []platformVersion, outputDir, userAgent string) []runtime.DownloadTask {
-	var tasks []runtime.DownloadTask
-
-	// Get base URL from config or use default
 	baseURL := "https://www.python.org/ftp/python"
 	if a.config != nil && a.config.Download.BaseURL != "" {
 		baseURL = a.config.Download.BaseURL
 	}
 
-	// Add GPG signature files if GPG verification is enabled
-	if a.config == nil || a.config.Verification.Methods.GPG.Enabled {
-		for _, pv := range platformVersions {
-			versionBaseURL := fmt.Sprintf("%s/%s", baseURL, pv.version)
-
-			// Get the main file URL to derive the signature URL
-			mainURL := a.constructDownloadURL(pv.version, pv.plat)
-			if mainURL == "" {
-				continue
-			}
-
-			// Extract filename and create signature URL
-			parts := strings.Split(mainURL, "/")
-			fileName := parts[len(parts)-1]
-
-			// Python uses .asc files for GPG signatures
-			signatureFileName := fileName + ".asc"
-			signatureURL := versionBaseURL + "/" + signatureFileName
-
-			signatureTask := runtime.DownloadTask{
-				URL:        signatureURL,
-				OutputPath: filepath.Join(outputDir, signatureFileName),
-				Platform:   pv.plat,
-				Runtime:    Python,
-				Version:    pv.version,
-				FileType:   "signature",
-				Headers:    map[string]string{"User-Agent": userAgent},
-				Optional:   true, // Signature files are optional
-			}
-			tasks = append(tasks, signatureTask)
-		}
+	switch {
+	case a.config != nil && a.config.SigstoreEnabled():
+		return a.buildSidecarTasks(platformVersions, baseURL, outputDir, userAgent,
+			a.config.Verification.Methods.Sigstore.BundleSuffixOrDefault(), "sigstore")
+	case a.config == nil || a.config.GPGEnabled():
+		return a.buildSidecarTasks(platformVersions, baseURL, outputDir, userAgent, ".asc", "signature")
 	}
+	return nil
+}
 
+// buildSidecarTasks emits optional sidecar download tasks (one per main
+// artifact) deriving each sidecar URL from the main artifact's URL plus suffix.
+// Used for both Sigstore (.sigstore) and GPG (.asc) sidecars.
+func (a *PythonAdapter) buildSidecarTasks(platformVersions []platformVersion, baseURL, outputDir, userAgent, suffix, fileType string) []runtime.DownloadTask {
+	tasks := make([]runtime.DownloadTask, 0, len(platformVersions))
+	for _, pv := range platformVersions {
+		mainURL := a.constructDownloadURL(pv.version, pv.plat)
+		if mainURL == "" {
+			continue
+		}
+		parts := strings.Split(mainURL, "/")
+		fileName := parts[len(parts)-1]
+		sidecarName := fileName + suffix
+
+		tasks = append(tasks, runtime.DownloadTask{
+			URL:        fmt.Sprintf("%s/%s/%s", baseURL, pv.version, sidecarName),
+			OutputPath: filepath.Join(outputDir, sidecarName),
+			Platform:   pv.plat,
+			Runtime:    Python,
+			Version:    pv.version,
+			FileType:   fileType,
+			Headers:    map[string]string{"User-Agent": userAgent},
+			Optional:   true, // missing sidecars skip verification rather than failing
+		})
+	}
 	return tasks
 }
 
@@ -510,7 +504,12 @@ func (a *PythonAdapter) ProcessDownloads(ctx context.Context, tasks []runtime.Do
 }
 
 // GetVerificationStrategy returns the verification strategy for Python downloads.
+// Sigstore takes precedence over GPG: when sigstore is enabled, the Sigstore
+// verifier is used and GPG is ignored entirely.
 func (a *PythonAdapter) GetVerificationStrategy() runtime.VerificationStrategy {
+	if a.config != nil && a.config.SigstoreEnabled() {
+		return NewPythonSigstoreVerifier(a.config, a.stdout)
+	}
 	return NewPythonGPGVerifier(a.stdout)
 }
 
@@ -718,320 +717,4 @@ func (a *PythonAdapter) validateVersionPolicy(version endoflife.VersionInfo) err
 
 	// If version not found in policy, reject the download
 	return fmt.Errorf("python version %s not found in policy file %s", version.Version, a.config.PolicyFile)
-}
-
-// NoOpVerifier is a no-operation verifier that always succeeds.
-// Used when GPG key loading fails as a fallback.
-type NoOpVerifier struct {
-	runtimeName string
-	logger      *slog.Logger
-}
-
-// Verify always returns nil (success) for no-op verification.
-func (v *NoOpVerifier) Verify(ctx context.Context, result runtime.DownloadResult) error {
-	v.logger.Warn("no-op verification - GPG keys not available",
-		"runtime", v.runtimeName,
-		"file", result.LocalPath)
-	return nil
-}
-
-// GetType returns the verification strategy type.
-func (v *NoOpVerifier) GetType() string {
-	return "noop"
-}
-
-// RequiresAdditionalFiles returns false since no-op verification doesn't need extra files.
-func (v *NoOpVerifier) RequiresAdditionalFiles() bool {
-	return false
-}
-
-// PythonGPGVerifier implements GPG signature verification for Python downloads
-type PythonGPGVerifier struct {
-	keyRing gpg.KeyRing
-	logger  *slog.Logger
-}
-
-// NewPythonGPGVerifier creates a new GPG verifier for Python downloads using embedded keys
-func NewPythonGPGVerifier(logger *slog.Logger) runtime.VerificationStrategy {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	verifier := &PythonGPGVerifier{
-		logger: logger,
-	}
-
-	// Load embedded keys using custom logic for numbered files
-	keyRing, err := loadPythonEmbeddedKeys(embeddedKeysFS, "keys", logger)
-	if err != nil {
-		logger.Error("Failed to load Python GPG keys from embedded filesystem", "error", err)
-		// Return a no-op verifier if key loading fails
-		return &NoOpVerifier{runtimeName: "python", logger: logger}
-	}
-
-	verifier.keyRing = keyRing
-	logger.Info("Loaded Python GPG verification keys", "source", "embedded")
-	return verifier
-}
-
-// loadPythonEmbeddedKeys loads GPG keys from embedded filesystem, handling numbered files
-func loadPythonEmbeddedKeys(fs embed.FS, keysPath string, logger *slog.Logger) (gpg.KeyRing, error) {
-	files, err := fs.ReadDir(keysPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read embedded keys directory: %w", err)
-	}
-
-	keyRing := gpg.NewRealKeyRing()
-	keyCount := 0
-
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		fileName := file.Name()
-
-		// Skip .gitkeep files
-		if fileName == ".gitkeep" {
-			continue
-		}
-
-		filePath := filepath.Join(keysPath, fileName)
-		keyData, err := fs.ReadFile(filePath)
-		if err != nil {
-			logger.Warn("Failed to read embedded key file", "file", fileName, "error", err)
-			continue
-		}
-
-		// Check if this looks like a GPG key file
-		keyContent := string(keyData)
-		if !strings.Contains(keyContent, "BEGIN PGP PUBLIC KEY BLOCK") {
-			logger.Debug("Skipping non-GPG file", "file", fileName)
-			continue
-		}
-
-		if len(keyData) > 100*1024*1024 { // 100MB max
-			logger.Warn("Embedded key file exceeds maximum allowed size", "file", fileName)
-			continue
-		}
-
-		key, err := gpg.NewRealKey(keyContent)
-		if err != nil {
-			logger.Warn("Failed to parse embedded key", "file", fileName, "error", err)
-			continue
-		}
-
-		// Validate key (check if revoked, etc.)
-		if key.IsRevoked() {
-			logger.Warn("Skipping revoked key", "file", fileName, "fingerprint", key.GetFingerprint())
-			continue
-		}
-
-		if err := keyRing.AddKey(key); err != nil {
-			logger.Warn("Failed to add key to keyring", "file", fileName, "error", err)
-			continue
-		}
-
-		keyCount++
-		logger.Debug("Loaded Python GPG key", "file", fileName, "fingerprint", key.GetFingerprint())
-	}
-
-	if keyCount == 0 {
-		return nil, fmt.Errorf("no valid GPG keys found in embedded directory")
-	}
-
-	logger.Info("Successfully loaded Python GPG keys", "count", keyCount)
-	return keyRing, nil
-}
-
-// Verify implements the VerificationStrategy interface
-func (v *PythonGPGVerifier) Verify(ctx context.Context, result runtime.DownloadResult) error {
-	if v.keyRing == nil {
-		v.logger.Error("No GPG keyring available for verification",
-			"file", result.LocalPath,
-			"runtime", result.Runtime)
-		return fmt.Errorf("no GPG keyring available for verification")
-	}
-
-	if result.Error != nil {
-		v.logger.Error("Cannot verify failed download",
-			"file", result.LocalPath,
-			"download_error", result.Error,
-			"runtime", result.Runtime)
-		return fmt.Errorf("cannot verify failed download: %w", result.Error)
-	}
-
-	v.logger.Info("Starting Python GPG verification",
-		"file", result.LocalPath,
-		"url", result.URL,
-		"runtime", result.Runtime,
-		"version", result.Version,
-		"file_size", result.FileSize)
-
-	// Determine file type based on filename
-	fileName := filepath.Base(result.LocalPath)
-
-	// For signature files (.asc), these are detached signatures in Python's case
-	// We should skip verification of signature files themselves
-	if strings.HasSuffix(fileName, ".asc") {
-		v.logger.Debug("Detected signature file, skipping direct verification",
-			"file", result.LocalPath,
-			"runtime", result.Runtime,
-			"note", "Signature files are used to verify main files")
-		return nil // Don't verify signature files directly
-	}
-
-	// For main files, look for corresponding signature files
-	v.logger.Debug("Detected main file, looking for signature file",
-		"file", result.LocalPath,
-		"runtime", result.Runtime)
-	return v.verifyMainFile(result)
-}
-
-// GetType returns the verification strategy type
-func (v *PythonGPGVerifier) GetType() string {
-	return "python-gpg"
-}
-
-// RequiresAdditionalFiles returns true since we need signature files
-func (v *PythonGPGVerifier) RequiresAdditionalFiles() bool {
-	return true
-}
-
-// verifyMainFile verifies a main download file by looking for its signature
-func (v *PythonGPGVerifier) verifyMainFile(result runtime.DownloadResult) error {
-	// Look for corresponding .asc signature file
-	ascFilePath := result.LocalPath + ".asc"
-
-	v.logger.Debug("Looking for signature file",
-		"main_file", result.LocalPath,
-		"signature_file", ascFilePath)
-
-	// Check if signature file exists
-	var gpgVerified bool
-	var verificationStatus string
-
-	if _, err := os.Stat(ascFilePath); os.IsNotExist(err) {
-		v.logger.Warn("Signature file not found for main file, skipping GPG verification",
-			"main_file", result.LocalPath,
-			"signature_file", ascFilePath)
-
-		// No signature file, so no GPG verification attempted
-		gpgVerified = false
-		verificationStatus = "signature_file_missing"
-
-		// Create individual audit file for this download
-		if auditErr := v.createIndividualAuditFile(result, gpgVerified, verificationStatus); auditErr != nil {
-			v.logger.Error("Failed to create individual audit file",
-				"main_file", result.LocalPath,
-				"error", auditErr)
-		}
-
-		return nil // Optional verification - don't fail if signature file is missing
-	}
-
-	v.logger.Debug("Found signature file, performing detached signature verification",
-		"main_file", result.LocalPath,
-		"signature_file", ascFilePath)
-
-	// Verify detached signature
-	err := gpg.VerifyDetachedSignature(v.keyRing, result.LocalPath, ascFilePath)
-	if err != nil {
-		v.logger.Error("GPG verification failed for main file",
-			"main_file", result.LocalPath,
-			"signature_file", ascFilePath,
-			"error", err)
-
-		// GPG verification failed
-		gpgVerified = false
-		verificationStatus = "gpg_verification_failed"
-
-		// Create individual audit file for this download
-		if auditErr := v.createIndividualAuditFile(result, gpgVerified, verificationStatus); auditErr != nil {
-			v.logger.Error("Failed to create individual audit file",
-				"main_file", result.LocalPath,
-				"error", auditErr)
-		}
-
-		return fmt.Errorf("GPG verification failed for %s: %w", result.LocalPath, err)
-	}
-
-	v.logger.Info("GPG verification successful for main file",
-		"main_file", result.LocalPath,
-		"signature_file", ascFilePath)
-
-	// GPG verification succeeded
-	gpgVerified = true
-	verificationStatus = "success"
-
-	// Create individual audit file for this download
-	if auditErr := v.createIndividualAuditFile(result, gpgVerified, verificationStatus); auditErr != nil {
-		v.logger.Error("Failed to create individual audit file",
-			"main_file", result.LocalPath,
-			"error", auditErr)
-	}
-
-	return nil
-}
-
-// createIndividualAuditFile creates an individual audit file for a downloaded Python file
-func (v *PythonGPGVerifier) createIndividualAuditFile(result runtime.DownloadResult, gpgVerified bool, verificationStatus string) error {
-	// Reconstruct signature URL (educated guess based on main file URL)
-	// NOTE: Actual URL comes from Python download sources but we only have main file URL
-	var signatureFileURL string
-	urlIsReconstructed := true
-
-	if result.URL != "" {
-		signatureFileURL = result.URL + ".asc"
-	}
-
-	// Create audit record
-	auditRecord := map[string]interface{}{
-		"timestamp":           time.Now().UTC().Format(time.RFC3339),
-		"file_path":           result.LocalPath,
-		"file_url":            result.URL,
-		"runtime":             "python",
-		"checksum_verified":   false, // Python doesn't use checksum verification
-		"gpg_verified":        gpgVerified,
-		"verification_status": verificationStatus,
-	}
-
-	// Add GPG-specific details if signature file exists
-	signatureFile := result.LocalPath + ".asc"
-	if _, err := os.Stat(signatureFile); err == nil {
-		auditRecord["gpg_validation_method"] = "detached_signature_verification"
-		auditRecord["gpg_keyring_source"] = "embedded_python_keys"
-		auditRecord["signature_file"] = signatureFile
-		auditRecord["signature_file_url"] = signatureFileURL
-		auditRecord["signature_url_reconstructed"] = urlIsReconstructed
-	}
-
-	// Get file info for additional metadata
-	if fileInfo, err := os.Stat(result.LocalPath); err == nil {
-		auditRecord["file_size"] = fileInfo.Size()
-		auditRecord["file_modified"] = fileInfo.ModTime().UTC().Format(time.RFC3339)
-	}
-
-	// Marshal to JSON
-	jsonData, err := json.MarshalIndent(auditRecord, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal audit record to JSON: %w", err)
-	}
-
-	// Create audit file path (same as main file but with .audit.json extension)
-	auditFilePath := result.LocalPath + ".audit.json"
-
-	// Write audit file
-	if err := os.WriteFile(auditFilePath, jsonData, 0644); err != nil {
-		return fmt.Errorf("failed to write audit file %s: %w", auditFilePath, err)
-	}
-
-	v.logger.Info("Created individual audit file for Python download",
-		"main_file", result.LocalPath,
-		"audit_file", auditFilePath,
-		"gpg_verified", gpgVerified,
-		"verification_status", verificationStatus,
-		"file_url", result.URL)
-
-	return nil
 }

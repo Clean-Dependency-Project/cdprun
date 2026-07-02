@@ -51,8 +51,28 @@ runtimes:
           file_pattern: ""
           remote_checksum: false
         gpg:
-          enabled: true
+          enabled: false
           signature_pattern: ".asc"
+        sigstore:
+          enabled: true
+          bundle_suffix: ".sigstore"
+          # Only the latest Sigstore-signed release lines are covered. Older
+          # releases (3.13 and below) are intentionally ignored: if a .sigstore
+          # bundle is present but no identity row matches, verification is
+          # skipped (ClamAV still runs). Per python.org, 3.14+ is Sigstore-only.
+          identities:
+            - version_prefix: "3.17"
+              cert_identity: "savannah@python.org"
+              oidc_issuer: "https://github.com/login/oauth"
+            - version_prefix: "3.16"
+              cert_identity: "savannah@python.org"
+              oidc_issuer: "https://github.com/login/oauth"
+            - version_prefix: "3.15"
+              cert_identity: "hugo@python.org"
+              oidc_issuer: "https://github.com/login/oauth"
+            - version_prefix: "3.14"
+              cert_identity: "hugo@python.org"
+              oidc_issuer: "https://github.com/login/oauth"
         clamav:
           enabled: true
           image: "clamav/clamav-debian:latest"

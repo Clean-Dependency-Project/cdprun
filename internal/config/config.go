@@ -52,8 +52,8 @@ type GlobalConfig struct {
 	DownloadTimeout          string                   `yaml:"download_timeout"`
 	AutoDownloadAllPlatforms bool                     `yaml:"auto_download_all_platforms"`
 	Storage                  StorageConfig            `yaml:"storage"`
-	IgnoreFile               string                   `yaml:"ignore_file"`        // Path to file listing platform-specific versions to ignore
-	UnsupportedFile          string                   `yaml:"unsupported_file"`   // Path to file listing unsupported runtime version prefixes
+	IgnoreFile               string                   `yaml:"ignore_file"`      // Path to file listing platform-specific versions to ignore
+	UnsupportedFile          string                   `yaml:"unsupported_file"` // Path to file listing unsupported runtime version prefixes
 	PackagingExecution       PackagingExecutionConfig `yaml:"packaging_execution"`
 }
 
@@ -165,7 +165,23 @@ type Verification struct {
 type VerificationMethods struct {
 	Checksum ChecksumVerification `yaml:"checksum"`
 	GPG      GPGVerification      `yaml:"gpg"`
+	Sigstore SigstoreVerification `yaml:"sigstore"`
 	ClamAV   ClamAVVerification   `yaml:"clamav"`
+}
+
+// SigstoreVerification represents upstream Sigstore bundle verification configuration.
+// When enabled, it takes precedence over GPG for the runtime.
+type SigstoreVerification struct {
+	Enabled      bool                    `yaml:"enabled"`
+	BundleSuffix string                  `yaml:"bundle_suffix"` // defaults to ".sigstore"
+	Identities   []SigstoreIdentityEntry `yaml:"identities"`
+}
+
+// SigstoreIdentityEntry pins the expected signing identity for a release line.
+type SigstoreIdentityEntry struct {
+	VersionPrefix string `yaml:"version_prefix"` // major.minor, e.g. "3.15"
+	CertIdentity  string `yaml:"cert_identity"`
+	OIDCIssuer    string `yaml:"oidc_issuer"`
 }
 
 // ChecksumVerification represents checksum verification configuration.
@@ -361,7 +377,7 @@ func (v *Verification) Validate() error {
 			return ErrChecksumPatternRequired
 		}
 	}
-	if v.Methods.GPG.Enabled {
+	if v.Methods.GPG.Enabled && !v.Methods.Sigstore.Enabled {
 		if v.Methods.GPG.SignaturePattern == "" {
 			return ErrSignaturePatternRequired
 		}
@@ -372,7 +388,134 @@ func (v *Verification) Validate() error {
 			return ErrClamAVImageRequired
 		}
 	}
+	if err := v.Methods.Sigstore.Validate(); err != nil {
+		return fmt.Errorf("sigstore: %w", err)
+	}
 	return nil
+}
+
+// ErrSigstoreIdentityRequired is returned when sigstore verification is enabled without identities.
+var ErrSigstoreIdentityRequired = errors.New("at least one identity is required when sigstore is enabled")
+
+// ErrSigstoreIdentityIncomplete is returned when an identity entry is missing required fields.
+var ErrSigstoreIdentityIncomplete = errors.New("sigstore identity entries require version_prefix, cert_identity, and oidc_issuer")
+
+// Validate validates sigstore verification configuration.
+func (s *SigstoreVerification) Validate() error {
+	if !s.Enabled {
+		return nil
+	}
+	if len(s.Identities) == 0 {
+		return ErrSigstoreIdentityRequired
+	}
+	for _, id := range s.Identities {
+		if strings.TrimSpace(id.VersionPrefix) == "" ||
+			strings.TrimSpace(id.CertIdentity) == "" ||
+			strings.TrimSpace(id.OIDCIssuer) == "" {
+			return ErrSigstoreIdentityIncomplete
+		}
+	}
+	return nil
+}
+
+// BundleSuffixOrDefault returns the configured bundle suffix or ".sigstore".
+func (s *SigstoreVerification) BundleSuffixOrDefault() string {
+	if s.BundleSuffix == "" {
+		return ".sigstore"
+	}
+	return s.BundleSuffix
+}
+
+// SigstoreEnabled reports whether sigstore verification is active for the runtime.
+func (r *Runtime) SigstoreEnabled() bool {
+	return r.Verification.Enabled && r.Verification.Methods.Sigstore.Enabled
+}
+
+// GPGEnabled reports whether GPG verification is active. Sigstore takes precedence,
+// so GPG is considered disabled whenever sigstore is enabled.
+func (r *Runtime) GPGEnabled() bool {
+	if r.SigstoreEnabled() {
+		return false
+	}
+	return r.Verification.Enabled && r.Verification.Methods.GPG.Enabled
+}
+
+// ErrSigstoreVersionInvalid is returned when a version cannot be parsed to major.minor.
+var ErrSigstoreVersionInvalid = errors.New("could not parse major.minor from version")
+
+// ResolveSigstoreIdentityEntry returns the identity entry whose version_prefix
+// (major.minor) longest-matches the given release version.
+//
+// It returns (nil, nil) when no entry matches — this is the "ignore old
+// releases" case: Sigstore verification is skipped for that version (ClamAV
+// still runs). A non-nil error is returned only when the version cannot be
+// parsed to a major.minor prefix.
+func (r *Runtime) ResolveSigstoreIdentityEntry(version string) (*SigstoreIdentityEntry, error) {
+	if !r.SigstoreEnabled() {
+		return nil, nil
+	}
+	prefix, err := majorMinorPrefix(version)
+	if err != nil {
+		return nil, err
+	}
+	releaseParts := strings.Split(prefix, ".")
+	var best *SigstoreIdentityEntry
+	var bestParts []string
+	for i := range r.Verification.Methods.Sigstore.Identities {
+		entry := &r.Verification.Methods.Sigstore.Identities[i]
+		entryParts := strings.Split(strings.TrimSpace(entry.VersionPrefix), ".")
+		if !versionPrefixMatch(releaseParts, entryParts) {
+			continue
+		}
+		if best == nil || len(entryParts) > len(bestParts) {
+			best = entry
+			bestParts = entryParts
+		}
+	}
+	return best, nil
+}
+
+// versionPrefixMatch reports whether an identity entry's version_prefix matches
+// a release's major.minor components. Matching is component-wise so "3.1" does
+// not match "3.14" (unlike a raw string prefix). The entry may specify fewer
+// components than the release to act as a catch-all (e.g. "3" matches "3.14").
+func versionPrefixMatch(releaseParts, entryParts []string) bool {
+	if len(entryParts) == 0 || entryParts[0] == "" || len(entryParts) > len(releaseParts) {
+		return false
+	}
+	for i := range entryParts {
+		if entryParts[i] != releaseParts[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// majorMinorPrefix extracts the "major.minor" prefix from a version string.
+// It tolerates pre-release suffixes (e.g. "3.15.0b3" -> "3.15") and missing
+// patch components (e.g. "3.15" -> "3.15").
+func majorMinorPrefix(version string) (string, error) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return "", ErrSigstoreVersionInvalid
+	}
+	// Trim a leading 'v' if present.
+	version = strings.TrimPrefix(version, "v")
+	// Drop pre-release/build suffix after the first non-numeric segment past the patch.
+	clean := version
+	for i := 0; i < len(clean); i++ {
+		c := clean[i]
+		if c == '.' || (c >= '0' && c <= '9') {
+			continue
+		}
+		clean = clean[:i]
+		break
+	}
+	parts := strings.Split(strings.TrimSuffix(clean, "."), ".")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", ErrSigstoreVersionInvalid
+	}
+	return parts[0] + "." + parts[1], nil
 }
 
 // GetEnabledRuntimes returns a map of enabled runtime configurations.
