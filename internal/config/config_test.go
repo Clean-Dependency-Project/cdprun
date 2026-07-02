@@ -1003,3 +1003,268 @@ func TestGetConfiguredPlatforms_UsingSupportedArchitectures(t *testing.T) {
 		})
 	}
 }
+
+func TestSigstoreValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     SigstoreVerification
+		wantErr bool
+	}{
+		{
+			name:    "disabled is valid",
+			cfg:     SigstoreVerification{Enabled: false},
+			wantErr: false,
+		},
+		{
+			name:    "enabled without identities",
+			cfg:     SigstoreVerification{Enabled: true},
+			wantErr: true,
+		},
+		{
+			name: "enabled with incomplete identity",
+			cfg: SigstoreVerification{Enabled: true, Identities: []SigstoreIdentityEntry{
+				{VersionPrefix: "3.15", CertIdentity: "", OIDCIssuer: "https://github.com/login/oauth"},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "enabled with valid identities",
+			cfg: SigstoreVerification{Enabled: true, Identities: []SigstoreIdentityEntry{
+				{VersionPrefix: "3.15", CertIdentity: "hugo@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+			}},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveSigstoreIdentityEntry(t *testing.T) {
+	runtime := Runtime{
+		Enabled: true,
+		Verification: Verification{
+			Enabled: true,
+			Methods: VerificationMethods{
+				Sigstore: SigstoreVerification{
+					Enabled:      true,
+					BundleSuffix: ".sigstore",
+					Identities: []SigstoreIdentityEntry{
+						{VersionPrefix: "3.7", CertIdentity: "nad@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+						{VersionPrefix: "3.13", CertIdentity: "thomas@python.org", OIDCIssuer: "https://accounts.google.com"},
+						{VersionPrefix: "3.15", CertIdentity: "hugo@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		version    string
+		wantCert   string
+		wantIssuer string
+		wantNil    bool // no matching identity row -> skip (nil, nil)
+		wantErr    bool // unparseable version -> error
+	}{
+		{name: "3.15.0b3 -> hugo", version: "3.15.0b3", wantCert: "hugo@python.org", wantIssuer: "https://github.com/login/oauth"},
+		{name: "v3.15.0 -> hugo", version: "v3.15.0", wantCert: "hugo@python.org", wantIssuer: "https://github.com/login/oauth"},
+		{name: "3.13.1 -> thomas", version: "3.13.1", wantCert: "thomas@python.org", wantIssuer: "https://accounts.google.com"},
+		{name: "3.7.0 -> nad", version: "3.7.0", wantCert: "nad@python.org", wantIssuer: "https://github.com/login/oauth"},
+		{name: "3.15 -> hugo (no patch)", version: "3.15", wantCert: "hugo@python.org", wantIssuer: "https://github.com/login/oauth"},
+		{name: "unknown prefix skips", version: "2.7.0", wantNil: true},
+		{name: "empty version fails", version: "", wantErr: true},
+		{name: "single component fails", version: "3", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := runtime.ResolveSigstoreIdentityEntry(tt.version)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got entry=%v", entry)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNil {
+				if entry != nil {
+					t.Fatalf("expected nil entry (skip), got %+v", entry)
+				}
+				return
+			}
+			if entry == nil {
+				t.Fatalf("expected non-nil entry, got nil")
+			}
+			if entry.CertIdentity != tt.wantCert {
+				t.Errorf("cert: want %q, got %q", tt.wantCert, entry.CertIdentity)
+			}
+			if entry.OIDCIssuer != tt.wantIssuer {
+				t.Errorf("issuer: want %q, got %q", tt.wantIssuer, entry.OIDCIssuer)
+			}
+		})
+	}
+}
+
+func TestResolveSigstoreIdentityEntry_ComponentMatchNotStringPrefix(t *testing.T) {
+	// A "3.1" row must NOT match release "3.14" via string prefix; matching is
+	// component-wise. Likewise "3.14" must not match "3.140".
+	runtime := Runtime{
+		Enabled: true,
+		Verification: Verification{
+			Enabled: true,
+			Methods: VerificationMethods{
+				Sigstore: SigstoreVerification{
+					Enabled:      true,
+					BundleSuffix: ".sigstore",
+					Identities: []SigstoreIdentityEntry{
+						{VersionPrefix: "3.1", CertIdentity: "impostor@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+						{VersionPrefix: "3.14", CertIdentity: "hugo@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+					},
+				},
+			},
+		},
+	}
+
+	// 3.14.2 resolves to the 3.14 row, not the 3.1 row.
+	entry, err := runtime.ResolveSigstoreIdentityEntry("3.14.2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry == nil || entry.CertIdentity != "hugo@python.org" {
+		t.Errorf("3.14.2 -> entry=%+v, want hugo@python.org", entry)
+	}
+
+	// 3.10.0 must not match the 3.1 row (string prefix would wrongly match).
+	entry, err = runtime.ResolveSigstoreIdentityEntry("3.10.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry != nil {
+		t.Errorf("3.10.0 -> entry=%+v, want nil (no component-wise match)", entry)
+	}
+
+	// A single-component "3" catch-all row matches any 3.x release.
+	majorOnly := Runtime{
+		Enabled: true,
+		Verification: Verification{
+			Enabled: true,
+			Methods: VerificationMethods{
+				Sigstore: SigstoreVerification{
+					Enabled: true,
+					Identities: []SigstoreIdentityEntry{
+						{VersionPrefix: "3", CertIdentity: "catchall@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+					},
+				},
+			},
+		},
+	}
+	entry, err = majorOnly.ResolveSigstoreIdentityEntry("3.14.2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry == nil || entry.CertIdentity != "catchall@python.org" {
+		t.Errorf("3.14.2 with major-only row -> entry=%+v, want catchall@python.org", entry)
+	}
+}
+
+func TestSigstoreOverridesGPG(t *testing.T) {
+	runtime := Runtime{
+		Enabled: true,
+		Verification: Verification{
+			Enabled: true,
+			Methods: VerificationMethods{
+				GPG:      GPGVerification{Enabled: true, SignaturePattern: ".asc"},
+				Sigstore: SigstoreVerification{Enabled: true, Identities: []SigstoreIdentityEntry{{VersionPrefix: "3.15", CertIdentity: "hugo@python.org", OIDCIssuer: "https://github.com/login/oauth"}}},
+			},
+		},
+	}
+	if !runtime.SigstoreEnabled() {
+		t.Error("expected sigstore enabled")
+	}
+	if runtime.GPGEnabled() {
+		t.Error("expected GPG disabled when sigstore enabled")
+	}
+}
+
+func TestResolveSigstoreIdentityEntry_SkipOldReleases(t *testing.T) {
+	rt := Runtime{
+		Enabled: true,
+		Verification: Verification{
+			Enabled: true,
+			Methods: VerificationMethods{
+				Sigstore: SigstoreVerification{Enabled: true, Identities: []SigstoreIdentityEntry{
+					{VersionPrefix: "3.14", CertIdentity: "hugo@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+					{VersionPrefix: "3.15", CertIdentity: "hugo@python.org", OIDCIssuer: "https://github.com/login/oauth"},
+				}},
+			},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		version    string
+		wantNil    bool
+		wantCert   string
+		wantIssuer string
+		wantErr    bool
+	}{
+		{name: "3.15.0b3 covered -> entry", version: "3.15.0b3", wantCert: "hugo@python.org", wantIssuer: "https://github.com/login/oauth"},
+		{name: "3.14.2 covered -> entry", version: "3.14.2", wantCert: "hugo@python.org", wantIssuer: "https://github.com/login/oauth"},
+		{name: "3.13 old release -> skip (nil)", version: "3.13.0", wantNil: true},
+		{name: "2.7 old release -> skip (nil)", version: "2.7.0", wantNil: true},
+		{name: "empty version -> parse error", version: "", wantErr: true},
+		{name: "single component -> parse error", version: "3", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := rt.ResolveSigstoreIdentityEntry(tt.version)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got entry=%v", entry)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNil {
+				if entry != nil {
+					t.Errorf("expected nil entry (skip), got %+v", entry)
+				}
+				return
+			}
+			if entry == nil {
+				t.Fatal("expected non-nil entry, got nil")
+			}
+			if entry.CertIdentity != tt.wantCert {
+				t.Errorf("cert: want %q, got %q", tt.wantCert, entry.CertIdentity)
+			}
+			if entry.OIDCIssuer != tt.wantIssuer {
+				t.Errorf("issuer: want %q, got %q", tt.wantIssuer, entry.OIDCIssuer)
+			}
+		})
+	}
+}
+
+func TestResolveSigstoreIdentityEntry_DisabledReturnsNil(t *testing.T) {
+	rt := Runtime{Enabled: true, Verification: Verification{Enabled: true, Methods: VerificationMethods{
+		Sigstore: SigstoreVerification{Enabled: false},
+	}}}
+	entry, err := rt.ResolveSigstoreIdentityEntry("3.15.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry != nil {
+		t.Errorf("expected nil entry when sigstore disabled, got %+v", entry)
+	}
+}
