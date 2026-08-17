@@ -8,6 +8,8 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
 
+const temurinRuntimeName = "temurin"
+
 // LoadReleases loads all releases from the ReleaseReader and parses their artifact JSON.
 // Returns releases with parsed artifacts, or an error if loading or parsing fails.
 // For aggregated releases (version contains commas), splits into individual version entries.
@@ -30,8 +32,11 @@ func LoadReleases(reader ReleaseReader) ([]ReleaseWithArtifacts, error) {
 			versions := strings.Split(release.Version, ",")
 			for _, version := range versions {
 				version = strings.TrimSpace(version)
-				// Create filtered artifacts for this specific version
-				filteredArtifacts := filterArtifactsForVersion(artifacts, version)
+				needle := version
+				if release.Runtime == temurinRuntimeName {
+					needle = adoptiumFilenameVersion(version)
+				}
+				filteredArtifacts := filterArtifactsForVersion(artifacts, needle)
 
 				// Create a copy of the release with single version
 				individualRelease := release
@@ -128,17 +133,15 @@ func filterArtifactsForVersion(artifacts storage.ReleaseArtifacts, version strin
 	return filtered
 }
 
-// matchesVersion reports whether a filename advertises the given exact version.
-//
-// Matching is intentionally strict: only an exact substring match on the full
-// version string counts. We previously fell back to a major.minor prefix
-// match, but that caused mac/windows installers from one patch version to be
-// re-published under unrelated patch versions in the same security-only
-// aggregated release (see filterArtifactsForVersion for context).
-//
-// To avoid false positives such as filenames containing "3.12.123" matching
-// version "3.12.12", the version must be bounded on both sides by either a
-// non-digit character or the start/end of the filename.
+// adoptiumFilenameVersion returns the version as it appears in Adoptium archive
+// names. They use '_' where the Java version string uses '+'.
+func adoptiumFilenameVersion(version string) string {
+	return strings.ReplaceAll(version, "+", "_")
+}
+
+// matchesVersion reports whether filename contains version as a bounded substring.
+// The match must not be a prefix of a longer numeric token, so "3.12.12" does
+// not match "python-3.12.123-macos11.pkg".
 func matchesVersion(filename, version string) bool {
 	idx := 0
 	for {
