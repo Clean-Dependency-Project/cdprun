@@ -521,6 +521,176 @@ func TestLoadReleases(t *testing.T) {
 	}
 }
 
+func TestMatchesVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		version  string
+		want     bool
+	}{
+		{
+			name:     "nodejs exact",
+			filename: "node-v22.15.0-linux-x64.tar.xz",
+			version:  "22.15.0",
+			want:     true,
+		},
+		{
+			name:     "python does not attach a different patch",
+			filename: "python-3.12.10-macos11.pkg",
+			version:  "3.12.12",
+			want:     false,
+		},
+		{
+			name:     "python digit-bounded so 3.12.12 does not match 3.12.123",
+			filename: "python-3.12.123-macos11.pkg",
+			version:  "3.12.12",
+			want:     false,
+		},
+		{
+			name:     "temurin filename matches adoptium form",
+			filename: "OpenJDK21U-jdk_x64_mac_hotspot_21.0.12_8.pkg",
+			version:  "21.0.12_8",
+			want:     true,
+		},
+		{
+			name:     "temurin advertised form is not in the filename",
+			filename: "OpenJDK21U-jdk_x64_mac_hotspot_21.0.12_8.pkg",
+			version:  "21.0.12+8",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesVersion(tt.filename, tt.version); got != tt.want {
+				t.Fatalf("matchesVersion(%q, %q) = %v, want %v", tt.filename, tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdoptiumFilenameVersion(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "21.0.12+8", want: "21.0.12_8"},
+		{in: "17.0.20+8", want: "17.0.20_8"},
+		{in: "22.15.0", want: "22.15.0"},
+	}
+	for _, tt := range tests {
+		if got := adoptiumFilenameVersion(tt.in); got != tt.want {
+			t.Fatalf("adoptiumFilenameVersion(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestLoadReleases_TemurinAggregatedUsesAdoptiumFilenames(t *testing.T) {
+	reader := &mockReleaseReader{
+		releases: []storage.Release{
+			{
+				Runtime:    "temurin",
+				Version:    "21.0.12+8,17.0.20+8",
+				ReleaseTag: "temurin-multi-20260731T054136Z",
+				Artifacts: `{
+					"platforms": [
+						{
+							"platform": "mac-aarch64",
+							"platform_os": "mac",
+							"platform_arch": "aarch64",
+							"binary": {
+								"filename": "OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12_8.pkg",
+								"size": 1000,
+								"url": "https://example.com/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12_8.pkg"
+							}
+						},
+						{
+							"platform": "mac-x64",
+							"platform_os": "mac",
+							"platform_arch": "x64",
+							"binary": {
+								"filename": "OpenJDK17U-jdk_x64_mac_hotspot_17.0.20_8.pkg",
+								"size": 1000,
+								"url": "https://example.com/OpenJDK17U-jdk_x64_mac_hotspot_17.0.20_8.pkg"
+							}
+						}
+					],
+					"common_files": [],
+					"metadata": {}
+				}`,
+			},
+		},
+	}
+
+	got, err := LoadReleases(reader)
+	if err != nil {
+		t.Fatalf("LoadReleases() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("LoadReleases() length = %d, want 2", len(got))
+	}
+
+	byVersion := make(map[string]storage.ReleaseArtifacts, len(got))
+	for _, rel := range got {
+		byVersion[rel.Release.Version] = rel.Artifacts
+	}
+
+	v21 := byVersion["21.0.12+8"]
+	if len(v21.Platforms) != 1 {
+		t.Fatalf("version 21.0.12+8 platforms = %d, want 1", len(v21.Platforms))
+	}
+	if v21.Platforms[0].Binary == nil || v21.Platforms[0].Binary.Filename != "OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12_8.pkg" {
+		t.Fatalf("version 21.0.12+8 binary = %#v", v21.Platforms[0].Binary)
+	}
+
+	v17 := byVersion["17.0.20+8"]
+	if len(v17.Platforms) != 1 {
+		t.Fatalf("version 17.0.20+8 platforms = %d, want 1", len(v17.Platforms))
+	}
+	if v17.Platforms[0].Binary == nil || v17.Platforms[0].Binary.Filename != "OpenJDK17U-jdk_x64_mac_hotspot_17.0.20_8.pkg" {
+		t.Fatalf("version 17.0.20+8 binary = %#v", v17.Platforms[0].Binary)
+	}
+}
+
+func TestLoadReleases_NonTemurinDoesNotRewritePlus(t *testing.T) {
+	reader := &mockReleaseReader{
+		releases: []storage.Release{
+			{
+				Runtime:    "nodejs",
+				Version:    "1.2+3,1.2.0",
+				ReleaseTag: "nodejs-multi-test",
+				Artifacts: `{
+					"platforms": [
+						{
+							"platform": "linux-x64",
+							"platform_os": "linux",
+							"platform_arch": "x64",
+							"binary": {
+								"filename": "tool-1.2_3-linux-x64.tar.gz",
+								"size": 1000,
+								"url": "https://example.com/tool-1.2_3-linux-x64.tar.gz"
+							}
+						}
+					],
+					"common_files": [],
+					"metadata": {}
+				}`,
+			},
+		},
+	}
+
+	got, err := LoadReleases(reader)
+	if err != nil {
+		t.Fatalf("LoadReleases() error = %v", err)
+	}
+
+	for _, rel := range got {
+		if rel.Release.Version == "1.2+3" && len(rel.Artifacts.Platforms) != 0 {
+			t.Fatalf("nodejs version 1.2+3 matched %d platforms, want 0", len(rel.Artifacts.Platforms))
+		}
+	}
+}
+
 func TestWriteFileIfChanged(t *testing.T) {
 	tests := []struct {
 		name        string
