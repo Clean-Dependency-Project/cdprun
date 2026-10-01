@@ -273,44 +273,13 @@ func (t *TomcatAdapter) CreateDownloadTasks(version endoflife.VersionInfo, platf
 			continue // Skip this platform gracefully
 		}
 
-		// Create output path with platform subdirectory
-		platformDir := fmt.Sprintf("%s-%s", plat.OS, plat.Arch)
-		outputPath := filepath.Join(outputDir, platformDir, file.Filename)
-
-		// Main binary download task
-		mainTask := runtime.DownloadTask{
-			URL:        file.DownloadURL,
-			OutputPath: outputPath,
-			Platform:   plat,
-			Runtime:    "tomcat",
-			Version:    versionStr,
-			FileType:   "main",
-		}
-		tasks = append(tasks, mainTask)
-
-		// SHA512 checksum file
-		checksumTask := runtime.DownloadTask{
-			URL:        file.DownloadURL + ".sha512",
-			OutputPath: outputPath + ".sha512",
-			Platform:   plat,
-			Runtime:    "tomcat",
-			Version:    versionStr,
-			FileType:   "checksum",
-		}
-		tasks = append(tasks, checksumTask)
-
-		// GPG signature file (optional)
-		signatureTask := runtime.DownloadTask{
-			URL:        file.DownloadURL + ".asc",
-			OutputPath: outputPath + ".asc",
-			Platform:   plat,
-			Runtime:    "tomcat",
-			Version:    versionStr,
-			FileType:   "signature",
-			Optional:   true,
-		}
-		tasks = append(tasks, signatureTask)
+		tasks = append(tasks, t.tasksForFile(*file, outputDir)...)
 	}
+
+	// The Windows service installer is one file per version
+	// (apache-tomcat-<version>.exe). It is published next to the
+	// per-arch zip archives and does not replace them.
+	tasks = append(tasks, t.windowsInstallerTasks(versionStr, platforms, outputDir)...)
 
 	// Store proactive filtering results for reporting
 	t.lastProactiveResult = &ProactiveFilterResult{
@@ -443,6 +412,102 @@ func (t *TomcatAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policy []e
 
 // Helper functions
 
+// tasksForFile returns the binary plus its SHA512 and GPG sidecar tasks.
+func (t *TomcatAdapter) tasksForFile(file TomcatFileInfo, outputDir string) []runtime.DownloadTask {
+	platformDir := fmt.Sprintf("%s-%s", file.Platform.OS, file.Platform.Arch)
+	outputPath := filepath.Join(outputDir, platformDir, file.Filename)
+
+	return []runtime.DownloadTask{
+		{
+			URL:        file.DownloadURL,
+			OutputPath: outputPath,
+			Platform:   file.Platform,
+			Runtime:    "tomcat",
+			Version:    file.Version,
+			FileType:   "main",
+		},
+		{
+			URL:        file.DownloadURL + ".sha512",
+			OutputPath: outputPath + ".sha512",
+			Platform:   file.Platform,
+			Runtime:    "tomcat",
+			Version:    file.Version,
+			FileType:   "checksum",
+		},
+		{
+			URL:        file.DownloadURL + ".asc",
+			OutputPath: outputPath + ".asc",
+			Platform:   file.Platform,
+			Runtime:    "tomcat",
+			Version:    file.Version,
+			FileType:   "signature",
+			Optional:   true,
+		},
+	}
+}
+
+// windowsInstallerTasks adds the Windows service installer when a Windows
+// platform was requested and Apache published the .exe. A missing installer
+// leaves the zip and tar.gz tasks in place.
+func (t *TomcatAdapter) windowsInstallerTasks(version string, platforms []platform.Platform, outputDir string) []runtime.DownloadTask {
+	plat, ok := preferredWindowsPlatform(platforms)
+	if !ok {
+		return nil
+	}
+
+	filename := fmt.Sprintf("apache-tomcat-%s.exe", version)
+	downloadURL := fmt.Sprintf("%s/tomcat-%s/v%s/bin/%s", t.archiveBaseURL(), t.extractMajorVersion(version), version, filename)
+	if !t.checkFileExists(downloadURL) {
+		t.stderr.Warn("Tomcat Windows installer not found",
+			"version", version,
+			"url", downloadURL)
+		return nil
+	}
+
+	plat.FileExt = "exe"
+	t.stdout.Info("including Tomcat Windows installer",
+		"version", version,
+		"filename", filename,
+		"platform", fmt.Sprintf("%s-%s", plat.OS, plat.Arch))
+
+	return t.tasksForFile(TomcatFileInfo{
+		Filename:    filename,
+		DownloadURL: downloadURL,
+		Platform:    plat,
+		Version:     version,
+		Exists:      true,
+	}, outputDir)
+}
+
+// preferredWindowsPlatform returns the Windows platform the installer is
+// recorded against. x64 wins when both Windows architectures were requested
+// so the single installer is downloaded once.
+func preferredWindowsPlatform(platforms []platform.Platform) (platform.Platform, bool) {
+	var fallback platform.Platform
+	found := false
+	for _, plat := range platforms {
+		if plat.OS != "windows" {
+			continue
+		}
+		if plat.Arch == "x64" {
+			return plat, true
+		}
+		if !found {
+			fallback = plat
+			found = true
+		}
+	}
+	return fallback, found
+}
+
+func (t *TomcatAdapter) archiveBaseURL() string {
+	baseURL := "https://archive.apache.org/dist/tomcat"
+	if t.config != nil && t.config.Download.BaseURL != "" {
+		baseURL = t.config.Download.BaseURL
+	}
+	return strings.TrimRight(baseURL, "/")
+}
+
 // getFilename returns the appropriate filename for the platform
 func (t *TomcatAdapter) getFilename(version string, plat platform.Platform) string {
 	if plat.OS == "windows" {
@@ -527,10 +592,7 @@ func (t *TomcatAdapter) getAvailableFiles(version string) (*TomcatReleaseInfo, e
 	allPlatforms := t.getAllPossiblePlatforms()
 
 	// Check each platform to see if files actually exist
-	baseURL := "https://archive.apache.org/dist/tomcat" // fallback when config not set
-	if t.config != nil && t.config.Download.BaseURL != "" {
-		baseURL = t.config.Download.BaseURL
-	}
+	baseURL := t.archiveBaseURL()
 	for _, plat := range allPlatforms {
 		filename := t.getFilename(version, plat)
 		downloadURL := fmt.Sprintf("%s/tomcat-%s/v%s/bin/%s", baseURL, majorVersion, version, filename)

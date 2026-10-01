@@ -1,7 +1,9 @@
 package sitegen
 
 import (
+	"fmt"
 	"sort"
+	"time"
 )
 
 // BuildModel transforms releases into a SiteModel with deterministic sorting.
@@ -43,7 +45,7 @@ func BuildModel(releases []ReleaseWithArtifacts) *SiteModel {
 			}
 
 			patch := rel.Release.SemverPatch
-			runtimeMap[runtime][os][major][minor][patch] = append(
+			runtimeMap[runtime][os][major][minor][patch] = appendReleaseOnce(
 				runtimeMap[runtime][os][major][minor][patch],
 				rel,
 			)
@@ -225,6 +227,34 @@ func buildReleaseModelForOS(rel ReleaseWithArtifacts, osFilter string) ReleaseMo
 		Artifacts:   artifacts,
 		CommonFiles: commonFiles,
 	}
+}
+
+// appendReleaseOnce records a release once per OS version bucket.
+// One release can carry several binaries for the same OS (Windows zip and exe).
+// Listing it once keeps the page from repeating that whole set.
+func appendReleaseOnce(listed []ReleaseWithArtifacts, rel ReleaseWithArtifacts) []ReleaseWithArtifacts {
+	key := releaseIdentity(rel)
+	for _, existing := range listed {
+		if releaseIdentity(existing) == key {
+			return listed
+		}
+	}
+	return append(listed, rel)
+}
+
+func releaseIdentity(rel ReleaseWithArtifacts) string {
+	if rel.Release.ID != 0 {
+		return fmt.Sprintf("id:%d", rel.Release.ID)
+	}
+	if rel.Release.ReleaseTag != "" {
+		return "tag:" + rel.Release.ReleaseTag
+	}
+	return fmt.Sprintf("%s|%s|%s|%s",
+		rel.Release.Runtime,
+		rel.Release.Version,
+		rel.Release.ReleaseURL,
+		rel.Release.CreatedAt.UTC().Format(time.RFC3339Nano),
+	)
 }
 
 // normalizeOS normalizes OS names for consistent sorting.
