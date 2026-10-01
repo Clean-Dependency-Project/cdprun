@@ -14,6 +14,57 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
 
+func TestBuildModel_ListsWindowsZipAndExeOnce(t *testing.T) {
+	now := time.Now()
+	model := BuildModel([]ReleaseWithArtifacts{
+		{
+			Release: storage.Release{
+				Runtime:     "tomcat",
+				Version:     "10.1.60",
+				SemverMajor: 10,
+				SemverMinor: 1,
+				SemverPatch: 60,
+				ReleaseTag:  "tomcat-multi-test",
+				CreatedAt:   now,
+			},
+			Artifacts: storage.ReleaseArtifacts{
+				Platforms: []storage.PlatformArtifact{
+					{
+						Platform:     "windows-x64",
+						PlatformOS:   "windows",
+						PlatformArch: "x64",
+						Binary: &storage.ArtifactFile{
+							Filename: "apache-tomcat-10.1.60-windows-x64.zip",
+							URL:      "https://example.com/zip",
+						},
+					},
+					{
+						Platform:     "windows-x64",
+						PlatformOS:   "windows",
+						PlatformArch: "x64",
+						Binary: &storage.ArtifactFile{
+							Filename: "apache-tomcat-10.1.60.exe",
+							URL:      "https://example.com/exe",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if len(model.Runtimes) != 1 || len(model.Runtimes[0].Platforms) != 1 {
+		t.Fatalf("model = %+v", model)
+	}
+	versions := model.Runtimes[0].Platforms[0].Versions
+	if len(versions) != 1 || len(versions[0].Releases) != 1 {
+		t.Fatalf("versions = %+v, want one release", versions)
+	}
+	artifacts := versions[0].Releases[0].Artifacts
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts = %d, want zip and exe", len(artifacts))
+	}
+}
+
 func TestNormalizePackageName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1836,7 +1887,7 @@ func TestExpandUnsupportedVersions(t *testing.T) {
 			// Lexicographic would give: "10","10.24.1","16","16.20.1","16.20.2","8","8.17.0"
 			// Correct numeric:         "8","8.17.0","10","10.24.1","16","16.20.1","16.20.2"
 			wantVersions: []string{"8", "8.17.0", "10", "10.24.1", "16", "16.20.1", "16.20.2"},
-		},		{
+		}, {
 			name: "exact version match emits only the concrete version (no prefix duplicate)",
 			uc: config.UnsupportedConfig{
 				"nodejs": {{Version: "18.20.0", Reason: "EOL", EOLDate: "2024-04-30"}},

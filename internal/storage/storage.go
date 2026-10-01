@@ -24,14 +24,16 @@ type Download struct {
 	ID uint `gorm:"primaryKey"`
 
 	// What was downloaded
-	Runtime       string `gorm:"not null;index:idx_runtime_version;uniqueIndex:idx_unique_download"`
-	Version       string `gorm:"not null;index:idx_runtime_version,idx_version;uniqueIndex:idx_unique_download"`
-	VersionMajor  int    `gorm:"index"`
-	VersionMinor  int
-	VersionPatch  int
-	Platform      string `gorm:"not null;index:idx_platform;uniqueIndex:idx_unique_download"`
-	Architecture  string `gorm:"not null;index:idx_platform;uniqueIndex:idx_unique_download"`
-	Filename      string `gorm:"not null"`
+	Runtime      string `gorm:"not null;index:idx_runtime_version;uniqueIndex:idx_unique_download"`
+	Version      string `gorm:"not null;index:idx_runtime_version,idx_version;uniqueIndex:idx_unique_download"`
+	VersionMajor int    `gorm:"index"`
+	VersionMinor int
+	VersionPatch int
+	Platform     string `gorm:"not null;index:idx_platform;uniqueIndex:idx_unique_download"`
+	Architecture string `gorm:"not null;index:idx_platform;uniqueIndex:idx_unique_download"`
+	// Filename is part of the identity so one platform can store more than one
+	// artifact, such as the Tomcat Windows zip and the service installer exe.
+	Filename      string `gorm:"not null;uniqueIndex:idx_unique_download"`
 	FileExtension string
 	FileSize      int64
 	SourceURL     string `gorm:"not null"`
@@ -82,6 +84,7 @@ type Store interface {
 	RecordDownload(*Download) error
 	GetDownload(runtime, version, platform, arch string) (*Download, error)
 	IsAlreadyDownloaded(runtime, version, platform, arch string) (bool, error)
+	IsFileDownloaded(runtime, version, platform, arch, filename string) (bool, error)
 	UpdateVerification(id uint, checksumVerified, gpgVerified bool, status, errorMsg string) error
 	UpdateChecksumVerification(id uint, verified bool, algorithm, value, sourceURL string) error
 	UpdateGPGVerification(id uint, verified bool, signatureURL, keyringSource string) error
@@ -129,8 +132,25 @@ func InitDB(cfg Config) (*DB, error) {
 	if err := db.AutoMigrate(&Download{}, &Release{}, &PackageRecord{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
+	if err := ensureDownloadUniqueIndex(db); err != nil {
+		return nil, err
+	}
 
 	return &DB{db: db}, nil
+}
+
+// ensureDownloadUniqueIndex rebuilds the download identity index so it
+// includes filename. AutoMigrate leaves an existing unique index in place,
+// and the previous index rejected a second artifact for the same platform.
+func ensureDownloadUniqueIndex(db *gorm.DB) error {
+	if err := db.Exec("DROP INDEX IF EXISTS idx_unique_download").Error; err != nil {
+		return fmt.Errorf("drop download unique index: %w", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_download
+		ON downloads (runtime, version, platform, architecture, filename)`).Error; err != nil {
+		return fmt.Errorf("create download unique index: %w", err)
+	}
+	return nil
 }
 
 // Close closes the database connection
@@ -178,6 +198,19 @@ func (d *DB) IsAlreadyDownloaded(runtime, version, platform, arch string) (bool,
 		runtime, version, platform, arch, "success").Count(&count).Error
 	if err != nil {
 		return false, fmt.Errorf("failed to check if already downloaded: %w", err)
+	}
+	return count > 0, nil
+}
+
+// IsFileDownloaded reports whether this exact artifact was recorded as a
+// successful download. A second file for the same platform is a different row.
+func (d *DB) IsFileDownloaded(runtime, version, platform, arch, filename string) (bool, error) {
+	var count int64
+	err := d.db.Model(&Download{}).Where(
+		"runtime = ? AND version = ? AND platform = ? AND architecture = ? AND filename = ? AND verification_status = ?",
+		runtime, version, platform, arch, filename, "success").Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("failed to check if file is already downloaded: %w", err)
 	}
 	return count > 0, nil
 }

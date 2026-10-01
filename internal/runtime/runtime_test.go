@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -678,6 +679,50 @@ func TestManager_DownloadRuntime(t *testing.T) {
 	}
 	if got.ContentSHA256 == "" {
 		t.Error("ContentSHA256 is empty; expected computed sha256")
+	}
+}
+
+func TestManager_withoutRecordedTasks_KeepsUnrecordedFileOnSamePlatform(t *testing.T) {
+	db, err := storage.InitDB(storage.Config{DatabasePath: ":memory:", LogLevel: "silent"})
+	if err != nil {
+		t.Fatalf("InitDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const version = "10.1.60"
+	zip := &storage.Download{
+		Runtime:            "tomcat",
+		Version:            version,
+		Platform:           "windows",
+		Architecture:       "x64",
+		Filename:           "apache-tomcat-10.1.60-windows-x64.zip",
+		SourceURL:          "https://example.com/zip",
+		DownloadedAt:       time.Now(),
+		VerificationStatus: "success",
+	}
+	if err := db.RecordDownload(zip); err != nil {
+		t.Fatalf("RecordDownload() error = %v", err)
+	}
+
+	manager := NewManager(NewRegistry(), db, slog.New(slog.NewJSONHandler(io.Discard, nil)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	zipPath := filepath.Join(t.TempDir(), "windows-x64", zip.Filename)
+	exePath := filepath.Join(filepath.Dir(zipPath), "apache-tomcat-10.1.60.exe")
+	tasks := []DownloadTask{
+		{OutputPath: zipPath, FileType: "main", Platform: platform.Platform{OS: "windows", Arch: "x64"}},
+		{OutputPath: zipPath + ".sha512", FileType: "checksum", Platform: platform.Platform{OS: "windows", Arch: "x64"}},
+		{OutputPath: exePath, FileType: "main", Platform: platform.Platform{OS: "windows", Arch: "x64"}},
+		{OutputPath: exePath + ".sha512", FileType: "checksum", Platform: platform.Platform{OS: "windows", Arch: "x64"}},
+		{OutputPath: exePath + ".asc", FileType: "signature", Platform: platform.Platform{OS: "windows", Arch: "x64"}},
+	}
+
+	got := manager.withoutRecordedTasks(tasks, "tomcat", version)
+	if len(got) != 3 {
+		t.Fatalf("withoutRecordedTasks() len = %d, want 3", len(got))
+	}
+	for _, task := range got {
+		if filepath.Base(task.OutputPath) == zip.Filename || strings.HasPrefix(task.OutputPath, zipPath+".") {
+			t.Errorf("recorded zip task kept: %s", task.OutputPath)
+		}
 	}
 }
 

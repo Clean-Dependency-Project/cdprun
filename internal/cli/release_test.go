@@ -764,6 +764,98 @@ func TestBuildArtifactsJSON_RPMPackageWithAudit(t *testing.T) {
 	}
 }
 
+func TestBuildArtifactsJSON_KeepsTomcatZipAndExe(t *testing.T) {
+	rm := &ReleaseManager{
+		db:     &mockDatabaseStore{},
+		github: &mockGitHubReleaser{},
+		stdout: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		stderr: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	}
+
+	uploaded := map[string]artifactInfo{
+		"apache-tomcat-10.1.60-windows-x64.zip": {
+			URL: "https://example.com/apache-tomcat-10.1.60-windows-x64.zip",
+		},
+		"apache-tomcat-10.1.60-windows-x64.zip.asc": {
+			URL: "https://example.com/apache-tomcat-10.1.60-windows-x64.zip.asc",
+		},
+		"apache-tomcat-10.1.60-windows-x64.zip.audit.json": {
+			URL: "https://example.com/apache-tomcat-10.1.60-windows-x64.zip.audit.json",
+		},
+		"apache-tomcat-10.1.60.exe": {
+			URL: "https://example.com/apache-tomcat-10.1.60.exe",
+		},
+		"apache-tomcat-10.1.60.exe.asc": {
+			URL: "https://example.com/apache-tomcat-10.1.60.exe.asc",
+		},
+		"apache-tomcat-10.1.60.exe.audit.json": {
+			URL: "https://example.com/apache-tomcat-10.1.60.exe.audit.json",
+		},
+		"apache-tomcat-10.1.60.tar.gz": {
+			URL: "https://example.com/apache-tomcat-10.1.60.tar.gz",
+		},
+	}
+	results := []runtime.DownloadResult{
+		{
+			LocalPath: "/tmp/windows-x64/apache-tomcat-10.1.60-windows-x64.zip",
+			Platform:  platform.Platform{OS: "windows", Arch: "x64"},
+			Version:   "10.1.60",
+		},
+		{
+			LocalPath: "/tmp/windows-x64/apache-tomcat-10.1.60.exe",
+			Platform:  platform.Platform{OS: "windows", Arch: "x64"},
+			Version:   "10.1.60",
+		},
+		{
+			LocalPath: "/tmp/linux-x64/apache-tomcat-10.1.60.tar.gz",
+			Platform:  platform.Platform{OS: "linux", Arch: "x64"},
+			Version:   "10.1.60",
+		},
+	}
+
+	jsonStr, err := rm.buildArtifactsJSON(uploaded, results)
+	if err != nil {
+		t.Fatalf("buildArtifactsJSON() error = %v", err)
+	}
+
+	var artifacts storage.ReleaseArtifacts
+	if err := json.Unmarshal([]byte(jsonStr), &artifacts); err != nil {
+		t.Fatalf("buildArtifactsJSON() produced invalid JSON: %v", err)
+	}
+
+	var zipPlat, exePlat *storage.PlatformArtifact
+	for i := range artifacts.Platforms {
+		plat := &artifacts.Platforms[i]
+		if plat.Binary == nil {
+			continue
+		}
+		switch plat.Binary.Filename {
+		case "apache-tomcat-10.1.60-windows-x64.zip":
+			zipPlat = plat
+		case "apache-tomcat-10.1.60.exe":
+			exePlat = plat
+		}
+	}
+	if zipPlat == nil {
+		t.Fatal("windows zip missing from release artifacts")
+	}
+	if exePlat == nil {
+		t.Fatal("windows installer missing from release artifacts")
+	}
+	if zipPlat.Platform != "windows-x64" || exePlat.Platform != "windows-x64" {
+		t.Fatalf("platforms = %s and %s, want windows-x64", zipPlat.Platform, exePlat.Platform)
+	}
+	if zipPlat.Signature == nil || zipPlat.Signature.Filename != "apache-tomcat-10.1.60-windows-x64.zip.asc" {
+		t.Errorf("zip signature = %+v", zipPlat.Signature)
+	}
+	if exePlat.Signature == nil || exePlat.Signature.Filename != "apache-tomcat-10.1.60.exe.asc" {
+		t.Errorf("exe signature = %+v", exePlat.Signature)
+	}
+	if zipPlat.Audit == nil || exePlat.Audit == nil {
+		t.Error("zip and installer each need their own audit file")
+	}
+}
+
 func TestUploadArtifacts_DuplicateBasenameGetsPlatformQualifiedName(t *testing.T) {
 	tempDir := t.TempDir()
 	linuxDir := filepath.Join(tempDir, "linux-x64")

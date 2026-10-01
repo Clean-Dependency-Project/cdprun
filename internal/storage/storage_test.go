@@ -241,12 +241,12 @@ func TestRecordDownload(t *testing.T) {
 				Version:            "18.20.8",
 				Platform:           "darwin",
 				Architecture:       "arm64",
-				Filename:           "duplicate.tar.gz",
+				Filename:           "node-v18.20.8-darwin-arm64.tar.gz",
 				SourceURL:          "https://example.com/duplicate.tar.gz",
 				DownloadedAt:       time.Now(),
 				VerificationStatus: "success",
 			},
-			wantError: true, // Will fail on second insert due to unique constraint
+			wantError: true, // Same runtime, version, platform, arch, and filename
 		},
 	}
 
@@ -288,6 +288,38 @@ func TestRecordDownload(t *testing.T) {
 }
 
 // TestGetDownload tests retrieving download entries
+func TestRecordDownload_AllowsDistinctFilesOnSamePlatform(t *testing.T) {
+	db := newTestDB(t)
+
+	zipDownload := createTestDownload("tomcat", "10.1.60", "windows", "x64")
+	zipDownload.Filename = "apache-tomcat-10.1.60-windows-x64.zip"
+	exeDownload := createTestDownload("tomcat", "10.1.60", "windows", "x64")
+	exeDownload.Filename = "apache-tomcat-10.1.60.exe"
+
+	if err := db.RecordDownload(zipDownload); err != nil {
+		t.Fatalf("RecordDownload(zip) error = %v", err)
+	}
+	if err := db.RecordDownload(exeDownload); err != nil {
+		t.Fatalf("RecordDownload(exe) error = %v", err)
+	}
+
+	zipDone, err := db.IsFileDownloaded("tomcat", "10.1.60", "windows", "x64", zipDownload.Filename)
+	if err != nil {
+		t.Fatalf("IsFileDownloaded(zip) error = %v", err)
+	}
+	exeDone, err := db.IsFileDownloaded("tomcat", "10.1.60", "windows", "x64", exeDownload.Filename)
+	if err != nil {
+		t.Fatalf("IsFileDownloaded(exe) error = %v", err)
+	}
+	missing, err := db.IsFileDownloaded("tomcat", "10.1.60", "windows", "x64", "missing.exe")
+	if err != nil {
+		t.Fatalf("IsFileDownloaded(missing) error = %v", err)
+	}
+	if !zipDone || !exeDone || missing {
+		t.Fatalf("recorded zip=%v exe=%v missing=%v", zipDone, exeDone, missing)
+	}
+}
+
 func TestGetDownload(t *testing.T) {
 	tests := []struct {
 		name      string

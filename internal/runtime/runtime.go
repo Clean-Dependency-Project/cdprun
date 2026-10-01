@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -371,37 +372,6 @@ func (m *Manager) DownloadRuntime(ctx context.Context, runtimeName string, versi
 		return nil, fmt.Errorf("failed to get runtime provider: %w", err)
 	}
 
-	// Check database to skip already downloaded files
-	if m.db != nil {
-		var platformsToDownload []platform.Platform
-		for _, plat := range platforms {
-			alreadyDownloaded, err := m.db.IsAlreadyDownloaded(
-				runtimeName, version.LatestPatch, plat.OS, plat.Arch)
-			if err != nil {
-				m.stderr.Warn("failed to check download status in database",
-					"runtime", runtimeName, "version", version.LatestPatch,
-					"platform", plat.Classifier, "error", err)
-				platformsToDownload = append(platformsToDownload, plat)
-				continue
-			}
-
-			if alreadyDownloaded {
-				m.stdout.Info("skipping already downloaded and verified file",
-					"runtime", runtimeName, "version", version.LatestPatch,
-					"platform", plat.Classifier)
-				continue
-			}
-			platformsToDownload = append(platformsToDownload, plat)
-		}
-
-		if len(platformsToDownload) == 0 {
-			m.stdout.Info("all files already downloaded, skipping",
-				"runtime", runtimeName, "version", version.Version)
-			return []DownloadResult{}, nil
-		}
-		platforms = platformsToDownload
-	}
-
 	// Create download tasks
 	m.stdout.Debug("creating download tasks", "runtime", runtimeName, "version", version.Version)
 	tasks, err := provider.CreateDownloadTasks(version, platforms, outputDir)
@@ -411,6 +381,15 @@ func (m *Manager) DownloadRuntime(ctx context.Context, runtimeName string, versi
 			"version", version.Version,
 			"error", err)
 		return nil, fmt.Errorf("failed to create download tasks: %w", err)
+	}
+
+	if m.db != nil {
+		tasks = m.withoutRecordedTasks(tasks, runtimeName, version.LatestPatch)
+		if len(tasks) == 0 {
+			m.stdout.Info("all files already downloaded, skipping",
+				"runtime", runtimeName, "version", version.Version)
+			return []DownloadResult{}, nil
+		}
 	}
 
 	m.stdout.Debug("download tasks created",
@@ -666,6 +645,61 @@ func (m *Manager) DownloadRuntime(ctx context.Context, runtimeName string, versi
 		"failed", finalFailureCount)
 
 	return results, nil
+}
+
+// withoutRecordedTasks drops main files that already have a successful
+// database row, plus the checksum and signature tasks that belong to them.
+// A platform can have more than one main file. Only the recorded filename is skipped.
+func (m *Manager) withoutRecordedTasks(tasks []DownloadTask, runtimeName, version string) []DownloadTask {
+	recorded := make(map[string]struct{})
+	for _, task := range tasks {
+		if task.FileType != "main" {
+			continue
+		}
+		filename := filepath.Base(task.OutputPath)
+		done, err := m.db.IsFileDownloaded(runtimeName, version, task.Platform.OS, task.Platform.Arch, filename)
+		if err != nil {
+			m.stderr.Warn("failed to check download status in database",
+				"runtime", runtimeName,
+				"version", version,
+				"file", filename,
+				"error", err)
+			continue
+		}
+		if !done {
+			continue
+		}
+		recorded[task.OutputPath] = struct{}{}
+		m.stdout.Info("skipping already downloaded file",
+			"runtime", runtimeName,
+			"version", version,
+			"platform", fmt.Sprintf("%s-%s", task.Platform.OS, task.Platform.Arch),
+			"file", filename)
+	}
+	if len(recorded) == 0 {
+		return tasks
+	}
+
+	kept := make([]DownloadTask, 0, len(tasks))
+	for _, task := range tasks {
+		if taskIsRecorded(recorded, task.OutputPath) {
+			continue
+		}
+		kept = append(kept, task)
+	}
+	return kept
+}
+
+func taskIsRecorded(recorded map[string]struct{}, outputPath string) bool {
+	if _, ok := recorded[outputPath]; ok {
+		return true
+	}
+	for mainPath := range recorded {
+		if strings.HasPrefix(outputPath, mainPath+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyDownloads verifies downloaded files
@@ -935,7 +969,7 @@ func (d *ConcurrentDownloader) downloadFile(ctx context.Context, task DownloadTa
 	result.FileSize = size
 	result.Size = size // Compatibility alias
 
-	d.stdout.Debug("file download completed",
+	d.stdout.Info("downloaded file",
 		"url", task.URL,
 		"output_path", task.OutputPath,
 		"size_bytes", size,
