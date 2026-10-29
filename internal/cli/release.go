@@ -719,11 +719,12 @@ func (rm *ReleaseManager) buildArtifactsJSON(
 		}
 
 		// Platform-specific artifact.
-		// Include the binary name so a platform can publish more than one
+		// Include the artifact stem so one platform can publish more than one
 		// main file (Tomcat Windows zip and the service installer .exe).
-		// Sidecars share that name once their suffix is removed, so the
-		// audit and signature stay attached to the matching binary.
-		platformKey := fmt.Sprintf("%s-%s-%s-%s", fileInfo.Version, fileInfo.OS, fileInfo.Arch, artifactStem(originalFilename))
+		// The stem drops a sidecar suffix and a known archive extension, so
+		// foo.zip and foo.audit.json stay on the same record while
+		// foo.zip and bar.exe stay apart.
+		platformKey := fmt.Sprintf("%s-%s-%s-%s", fileInfo.Version, fileInfo.OS, fileInfo.Arch, storage.ArtifactStem(originalFilename))
 		basePlatformKey := fmt.Sprintf("%s-%s", fileInfo.OS, fileInfo.Arch)
 		if _, exists := platforms[platformKey]; !exists {
 			platforms[platformKey] = &storage.PlatformArtifact{
@@ -1059,16 +1060,6 @@ func contains(slice []string, val string) bool {
 		}
 	}
 	return false
-}
-
-// artifactStem returns the main binary name for a file and its sidecars.
-func artifactStem(filename string) string {
-	for _, suffix := range []string{".audit.json", ".metadata.json", ".sha512", ".asc", ".sig", ".cert"} {
-		if strings.HasSuffix(filename, suffix) {
-			return strings.TrimSuffix(filename, suffix)
-		}
-	}
-	return filename
 }
 
 // extractVersionFromFilename extracts version string from a filename.

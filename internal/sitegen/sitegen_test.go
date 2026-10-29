@@ -65,6 +65,69 @@ func TestBuildModel_ListsWindowsZipAndExeOnce(t *testing.T) {
 	}
 }
 
+func TestLoadReleases_PairsVSCodeStemAudit(t *testing.T) {
+	reader := &mockReleaseReader{
+		releases: []storage.Release{
+			{
+				Runtime:     "vscode",
+				Version:     "1.141.0",
+				SemverMajor: 1,
+				SemverMinor: 141,
+				SemverPatch: 0,
+				ReleaseTag:  "vscode-multi-20261008T084327Z",
+				Artifacts: `{
+					"platforms": [
+						{
+							"platform": "mac-aarch64",
+							"platform_os": "mac",
+							"platform_arch": "aarch64",
+							"binary": {
+								"filename": "vscode-1.141.0-mac-aarch64.zip",
+								"url": "https://example.com/vscode.zip"
+							}
+						},
+						{
+							"platform": "mac-aarch64",
+							"platform_os": "mac",
+							"platform_arch": "aarch64",
+							"audit": {
+								"filename": "vscode-1.141.0-mac-aarch64.audit.json",
+								"url": "https://example.com/vscode.audit.json"
+							}
+						}
+					]
+				}`,
+			},
+		},
+	}
+
+	got, err := LoadReleases(reader)
+	if err != nil {
+		t.Fatalf("LoadReleases() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("releases = %d, want 1", len(got))
+	}
+	if len(got[0].Artifacts.Platforms) != 1 {
+		t.Fatalf("platforms = %d, want the audit joined onto the binary", len(got[0].Artifacts.Platforms))
+	}
+	platform := got[0].Artifacts.Platforms[0]
+	if platform.Binary == nil || platform.Audit == nil {
+		t.Fatalf("platform = %+v, want binary and audit", platform)
+	}
+
+	model := BuildModel(got)
+	index := collectRuntimeArtifactIndex(model.Runtimes[0])
+	mac := index["mac"]
+	if len(mac) != 1 {
+		t.Fatalf("mac entries = %d, want 1", len(mac))
+	}
+	wantAudit := "vscode-multi-20261008T084327Z/vscode-1.141.0-mac-aarch64.audit.json"
+	if mac[0].Audit != wantAudit {
+		t.Errorf("audit = %q, want %q", mac[0].Audit, wantAudit)
+	}
+}
+
 func TestNormalizePackageName(t *testing.T) {
 	tests := []struct {
 		name     string

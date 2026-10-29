@@ -25,6 +25,10 @@ func LoadReleases(reader ReleaseReader) ([]ReleaseWithArtifacts, error) {
 		if err := json.Unmarshal([]byte(release.Artifacts), &artifacts); err != nil {
 			return nil, fmt.Errorf("failed to parse artifacts JSON for release %s: %w", release.ReleaseTag, err)
 		}
+		// Releases recorded after the per-filename platform key can store a
+		// stem audit (vscode-1.141.0-mac-aarch64.audit.json) on its own
+		// platform row. Join it back to the binary before rendering.
+		artifacts = storage.AttachSidecars(artifacts)
 
 		// Check if this is an aggregated release (version contains commas)
 		if strings.Contains(release.Version, ",") {

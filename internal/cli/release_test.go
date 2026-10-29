@@ -856,6 +856,66 @@ func TestBuildArtifactsJSON_KeepsTomcatZipAndExe(t *testing.T) {
 	}
 }
 
+func TestBuildArtifactsJSON_PairsVSCodeStemAudit(t *testing.T) {
+	rm := &ReleaseManager{
+		db:     &mockDatabaseStore{},
+		github: &mockGitHubReleaser{},
+		stdout: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		stderr: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	}
+
+	uploaded := map[string]artifactInfo{
+		"vscode-1.141.0-mac-aarch64.zip": {
+			URL: "https://example.com/vscode-1.141.0-mac-aarch64.zip",
+		},
+		"vscode-1.141.0-mac-aarch64.audit.json": {
+			URL: "https://example.com/vscode-1.141.0-mac-aarch64.audit.json",
+		},
+		"vscode-1.141.0-mac-x64.zip": {
+			URL: "https://example.com/vscode-1.141.0-mac-x64.zip",
+		},
+	}
+	results := []runtime.DownloadResult{
+		{
+			LocalPath: "/tmp/mac-aarch64/vscode-1.141.0-mac-aarch64.zip",
+			Platform:  platform.Platform{OS: "mac", Arch: "aarch64"},
+			Version:   "1.141.0",
+		},
+		{
+			LocalPath: "/tmp/mac-x64/vscode-1.141.0-mac-x64.zip",
+			Platform:  platform.Platform{OS: "mac", Arch: "x64"},
+			Version:   "1.141.0",
+		},
+	}
+
+	jsonStr, err := rm.buildArtifactsJSON(uploaded, results)
+	if err != nil {
+		t.Fatalf("buildArtifactsJSON() error = %v", err)
+	}
+
+	var artifacts storage.ReleaseArtifacts
+	if err := json.Unmarshal([]byte(jsonStr), &artifacts); err != nil {
+		t.Fatalf("buildArtifactsJSON() produced invalid JSON: %v", err)
+	}
+
+	var aarch64 *storage.PlatformArtifact
+	for i := range artifacts.Platforms {
+		plat := &artifacts.Platforms[i]
+		if plat.Binary != nil && plat.Binary.Filename == "vscode-1.141.0-mac-aarch64.zip" {
+			aarch64 = plat
+		}
+		if plat.Binary == nil && plat.Audit != nil {
+			t.Errorf("audit %q stored without its binary", plat.Audit.Filename)
+		}
+	}
+	if aarch64 == nil || aarch64.Audit == nil {
+		t.Fatal("mac aarch64 binary is missing its audit file")
+	}
+	if aarch64.Audit.Filename != "vscode-1.141.0-mac-aarch64.audit.json" {
+		t.Errorf("audit filename = %q", aarch64.Audit.Filename)
+	}
+}
+
 func TestUploadArtifacts_DuplicateBasenameGetsPlatformQualifiedName(t *testing.T) {
 	tempDir := t.TempDir()
 	linuxDir := filepath.Join(tempDir, "linux-x64")
