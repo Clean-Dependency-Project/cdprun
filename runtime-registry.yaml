@@ -162,21 +162,8 @@ runtimes:
      draft_release: false
      release_name_template: "Node.js Runtime Binaries - {version}"
    packaging:
-     enabled: true
-     targets: ["rpm"]
-     package_name_template: "OSPO-{runtime}"
-     install_prefix_template: "/export/apps/citools/OSPO-{runtime}/{version}"
-     execution:
-       targets:
-         rpm:
-           build:
-             image: "amazonlinux:2023"
-             shell: "/bin/bash"
-             script: "bash /workspace/scripts/package/rpm/build.sh"
-           test:
-             image: "amazonlinux:2023"
-             shell: "/bin/bash"
-             script: "bash /workspace/scripts/package/rpm/test.sh"
+     enabled: false
+     targets: []
   temurin:
     enabled: true
     name: "Eclipse Temurin"
