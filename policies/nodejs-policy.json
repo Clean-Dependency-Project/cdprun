@@ -1,5 +1,15 @@
 [
   {
+    "version": "26",
+    "releaseDate": "2026-05-05",
+    "eol": "2029-04-30",
+    "latestReleaseDate": "2026-10-28",
+    "lts": true,
+    "recommended": true,
+    "supported": true,
+    "under_review": false
+  },
+  {
     "version": "24",
     "releaseDate": "2025-05-06",
     "eol": "2028-04-30",
