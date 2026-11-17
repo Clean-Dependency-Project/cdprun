@@ -14,7 +14,7 @@ ROOT_BINARY_PATH=bin/$(ROOT_BINARY_NAME)
 
 all: test build
 
-build: test
+build: lint test
 	@echo "Building host binary ($(BINARY_NAME))..."
 	@mkdir -p bin
 	@$(GOBUILD) -o $(BINARY_PATH) ./cmd/runtime-cli/main.go
@@ -43,8 +43,20 @@ clean:
 	rm -f cdprun-demo-linux-amd64 cdprun-demo-windows-amd64.exe cdprun-demo-darwin-amd64
 	rm -rf bin/ dist/
 
-lint:
-	golangci-lint run
+# golangci-lint into ./bin. Version matches CI.
+GOLANGCI_LINT_VERSION ?= v2.14.0
+
+tools:
+	@mkdir -p bin
+	@if [ "$$(bin/golangci-lint version --short 2>/dev/null)" = "$(patsubst v%,%,$(GOLANGCI_LINT_VERSION))" ]; then \
+		echo "golangci-lint $(GOLANGCI_LINT_VERSION) already installed at $(CURDIR)/bin/golangci-lint"; \
+	else \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
+		GOBIN="$(CURDIR)/bin" $(GOCMD) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+	fi
+
+lint: tools
+	@bin/golangci-lint run --timeout=5m
 
 # Install dependencies
 deps:
@@ -269,4 +281,4 @@ nodejs-test: nodejs-rpm-test
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-only test clean lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto run-download run-package-build run-package-test run-package-promote nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test
+.PHONY: all build build-only test clean tools lint deps coverage coverage-report fmt imports sec build-all run run-local run-auto run-download run-package-build run-package-test run-package-promote nexus-download nexus-download-python nexus-download-nodejs nexus-download-dry-run python-amazonlinux python-alpine python-amazonlinux-shell python-alpine-shell nodejs-rpm-build nodejs-rpm-test nodejs-test
