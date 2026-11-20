@@ -385,6 +385,24 @@ func TestMatchPatterns(t *testing.T) {
 			version:  "22",
 			want:     true,
 		},
+		{
+			name:     "temurin patch matches a bare prefix",
+			patterns: []any{"21.0.13"},
+			version:  "21.0.13.1+2",
+			want:     true,
+		},
+		{
+			name:     "temurin patch matches its full name",
+			patterns: []any{"21.0.13.1+2"},
+			version:  "21.0.13.1+2",
+			want:     true,
+		},
+		{
+			name:     "temurin java 8 patch",
+			patterns: []any{"8u512"},
+			version:  "8u512-b09",
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {

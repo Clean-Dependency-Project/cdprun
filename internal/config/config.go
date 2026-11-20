@@ -313,10 +313,10 @@ func RuntimeSkipsPolicyFile(name string) bool {
 	}
 }
 
-// RuntimeSkipsEndOfLifeProduct reports runtimes not indexed on endoflife.date; endoflife_product may be omitted.
+// RuntimeSkipsEndOfLifeProduct reports runtimes whose version discovery does not use endoflife.date.
 func RuntimeSkipsEndOfLifeProduct(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "intellij_idea_ultimate", "pycharm":
+	case "intellij_idea_ultimate", "pycharm", "temurin":
 		return true
 	default:
 		return false
@@ -585,9 +585,8 @@ func DefaultConfig() *Config {
 				},
 			},
 			"temurin": {
-				Enabled:          true,
-				EndOfLifeProduct: "eclipse-temurin",
-				PolicyFile:       "policies/temurin-policy.json",
+				Enabled:    true,
+				PolicyFile: "policies/temurin-policy.json",
 				Verification: Verification{
 					Enabled: true,
 					Methods: VerificationMethods{

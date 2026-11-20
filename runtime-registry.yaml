@@ -168,7 +168,6 @@ runtimes:
     enabled: true
     name: "Eclipse Temurin"
     description: "OpenJDK distribution from Eclipse Foundation (Adoptium)"
-    endoflife_product: "temurin"  # Correct: Use "temurin" for endoflife.date API
     policy_file: "policies/temurin-policy.json"
 
     # Version management
@@ -190,10 +189,10 @@ runtimes:
         file_extension: "pkg"  # PKG for macOS
         download_name: "mac"
 
-    # Download configuration - Uses Adoptium API
+    # Download configuration - newest GA comes from Adoptium feature_releases
     download:
-      base_url: "https://api.adoptium.net/v3/assets/version"
-      url_pattern: "{base_url}/{version}"
+      base_url: "https://api.adoptium.net/v3/assets/feature_releases"
+      url_pattern: "{base_url}/{major}/ga"
       user_agent: "downloadruntime/1.0 (Temurin)"
       requires_auth: false
       disable_github_token_check: false  # Set to true to disable GitHub token warnings
@@ -217,12 +216,6 @@ runtimes:
         enabled: true
         output_dir: "./verification-logs"
         file_pattern: "{runtime}-{version}-{timestamp}.json"
-
-    # EndOfLife integration
-    endoflife:
-      product_name: "eclipse-temurin"
-      check_eol: true
-      warn_on_eol: true
 
     release:
       auto_release: true
