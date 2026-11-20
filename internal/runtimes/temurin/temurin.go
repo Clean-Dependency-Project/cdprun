@@ -1,6 +1,4 @@
 // Package temurin provides the Temurin (Eclipse Adoptium) runtime adapter for the unified runtime download system.
-// It integrates with the existing endoflife package and temurin-specific functionality
-// to provide version discovery, policy application, and download coordination with GPG verification.
 package temurin
 
 import (
@@ -12,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +27,16 @@ import (
 
 const (
 	Temurin = "temurin"
+
+	defaultAdoptiumBaseURL = "https://api.adoptium.net/v3"
 )
+
+// adoptiumAvailableReleases is the body of GET /v3/info/available_releases.
+type adoptiumAvailableReleases struct {
+	AvailableReleases        []int `json:"available_releases"`
+	AvailableLTSReleases     []int `json:"available_lts_releases"`
+	MostRecentFeatureRelease int   `json:"most_recent_feature_release"`
+}
 
 //go:embed keys/*.asc
 var embeddedTemurinKeys embed.FS
@@ -115,44 +121,31 @@ type AdoptiumVersionInfo struct {
 }
 
 // TemurinAdapter implements the RuntimeProvider interface for Temurin (Eclipse Adoptium).
-// It bridges the existing temurin package functionality with the unified runtime system.
 type TemurinAdapter struct {
-	endoflifeClient endoflife.Client
-	policyLoader    endoflife.PolicyLoader
 	downloader      *runtime.ConcurrentDownloader
 	config          *config.Runtime
 	globalConfig    *config.GlobalConfig
 	stdout          *slog.Logger
 	stderr          *slog.Logger
 	httpClient      *http.Client
+	adoptiumBaseURL string
 }
 
 // NewAdapter creates a new Temurin adapter with default configuration.
-func NewAdapter(eolClient endoflife.Client) runtime.RuntimeProvider {
-	// Check for GitHub token since Temurin downloads come from GitHub
-	if getGitHubTokenFromEnv() == "" {
-		slog.Default().Warn("GitHub token not found for Temurin downloads",
-			"impact", "Temurin downloads will fail due to GitHub rate limits (60 requests/hour)",
-			"solution", "set GITHUB_TOKEN environment variable before downloading",
-			"setup_url", "https://github.com/settings/tokens",
-			"env_vars", "GITHUB_TOKEN, GH_TOKEN, or GITHUB_ACCESS_TOKEN")
-	}
-
-	return &TemurinAdapter{
-		endoflifeClient: eolClient,
-		policyLoader:    endoflife.NewJSONPolicyLoader(),
-		downloader:      runtime.NewConcurrentDownloader(3, 30*time.Second, slog.Default(), slog.Default()),
-		stdout:          slog.Default(),
-		stderr:          slog.Default(),
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-	}
+func NewAdapter() runtime.RuntimeProvider {
+	return NewAdapterWithConfig(nil, nil, slog.Default(), slog.Default())
 }
 
 // NewAdapterWithConfig creates a new Temurin adapter with custom configuration.
-func NewAdapterWithConfig(eolClient endoflife.Client, cfg *config.Runtime, globalCfg *config.GlobalConfig, stdout, stderr *slog.Logger) runtime.RuntimeProvider {
-	// Check for GitHub token since Temurin downloads come from GitHub
+func NewAdapterWithConfig(cfg *config.Runtime, globalCfg *config.GlobalConfig, stdout, stderr *slog.Logger) runtime.RuntimeProvider {
+	if stdout == nil {
+		stdout = slog.Default()
+	}
+	if stderr == nil {
+		stderr = slog.Default()
+	}
+
+	// Check for GitHub token since Temurin downloads come from GitHub.
 	// NOTE: DownloadConfig currently has no disable flag for this warning.
 	if getGitHubTokenFromEnv() == "" {
 		stderr.Warn("GitHub token not found for Temurin downloads",
@@ -162,20 +155,18 @@ func NewAdapterWithConfig(eolClient endoflife.Client, cfg *config.Runtime, globa
 			"env_vars", "GITHUB_TOKEN, GH_TOKEN, or GITHUB_ACCESS_TOKEN")
 	}
 
-	// Parse timeout from global config, fallback to 30s if not available
 	timeout := 30 * time.Second
 	if globalCfg != nil {
 		timeout = globalCfg.GetDownloadTimeout()
 	}
 
 	return &TemurinAdapter{
-		endoflifeClient: eolClient,
-		policyLoader:    endoflife.NewJSONPolicyLoader(),
 		downloader:      runtime.NewConcurrentDownloader(3, timeout, stdout, stderr),
 		config:          cfg,
 		globalConfig:    globalCfg,
 		stdout:          stdout,
 		stderr:          stderr,
+		adoptiumBaseURL: defaultAdoptiumBaseURL,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -192,9 +183,9 @@ func (a *TemurinAdapter) GetName() string {
 	return "temurin"
 }
 
-// GetEndOfLifeProduct returns the endoflife.date product name.
+// GetEndOfLifeProduct returns an empty product name. Temurin versions come from the Adoptium API.
 func (a *TemurinAdapter) GetEndOfLifeProduct() string {
-	return "temurin" // Use correct API endpoint name
+	return ""
 }
 
 // GetSupportedPlatforms returns the list of platforms that Temurin supports.
@@ -206,64 +197,86 @@ func (a *TemurinAdapter) GetSupportedPlatforms() []platform.Platform {
 	return a.config.GetConfiguredPlatforms()
 }
 
-// GetMaintainedVersions returns all non-EOL versions from endoflife API.
-// Includes both actively maintained and security-only (EOAS) versions.
+// GetMaintainedVersions returns non-EOL Temurin lines from the Adoptium API.
 func (a *TemurinAdapter) GetMaintainedVersions(ctx context.Context) ([]endoflife.VersionInfo, error) {
-	if a.endoflifeClient == nil {
-		return nil, fmt.Errorf("endoflife client is not initialized")
+	versions, err := a.ListVersions(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return a.endoflifeClient.GetMaintainedReleases(ctx, a.GetEndOfLifeProduct())
+
+	maintained := make([]endoflife.VersionInfo, 0, len(versions))
+	for _, version := range versions {
+		if version.IsEOL {
+			continue
+		}
+		maintained = append(maintained, version)
+	}
+	return maintained, nil
 }
 
-// ListVersions retrieves available Temurin versions using the endoflife.date API.
+// ListVersions retrieves Temurin feature lines from the Adoptium API.
 func (a *TemurinAdapter) ListVersions(ctx context.Context) ([]endoflife.VersionInfo, error) {
-	a.stdout.Debug("fetching Temurin versions from endoflife.date API")
+	a.stdout.Debug("fetching Temurin versions from Adoptium API")
 
-	// Get product info from endoflife.date API
-	productInfo, err := a.endoflifeClient.GetProductInfo(ctx, a.GetEndOfLifeProduct())
+	available, err := a.fetchAvailableReleases(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get Temurin info from endoflife.date: %w", err)
+		return nil, err
 	}
 
-	var versions []endoflife.VersionInfo
-
-	// Convert endoflife.date releases to VersionInfo
-	for _, release := range productInfo.Result.Releases {
-		versionInfo := endoflife.VersionInfo{
-			Version:       release.Name,        // "21", "17", "11", etc.
-			LatestPatch:   release.Latest.Name, // "21.0.7+6", "17.0.15+6", etc.
-			IsLTS:         release.IsLTS,
-			IsSupported:   !release.IsEOL && release.IsMaintained,
-			IsRecommended: release.IsLTS, // LTS versions are recommended
-			IsEOL:         release.IsEOL,
-			IsEOAS:        release.IsEOAS, // End of Active Support for security-only detection
-			IsMaintained:  release.IsMaintained,
-			RuntimeName:   "temurin",
+	lts := intSet(available.AvailableLTSReleases)
+	versions := make([]endoflife.VersionInfo, 0, len(available.AvailableReleases))
+	var skipped []string
+	for _, major := range available.AvailableReleases {
+		release, err := a.fetchLatestFeatureRelease(ctx, major)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			a.stderr.Warn("skipping temurin feature line",
+				"major", major,
+				"error", err)
+			skipped = append(skipped, fmt.Sprintf("%d: %v", major, err))
+			continue
 		}
 
-		// Set dates if available
-		if release.EOLFrom != nil && *release.EOLFrom != "" {
-			versionInfo.EOLDate = *release.EOLFrom
-		}
-		if release.ReleaseDate != "" {
-			versionInfo.ReleaseDate = release.ReleaseDate
-		}
-
-		versions = append(versions, versionInfo)
+		isLTS := lts[major]
+		isEOL := !isLTS && major != available.MostRecentFeatureRelease
+		versions = append(versions, endoflife.VersionInfo{
+			Version:       strconv.Itoa(major),
+			LatestPatch:   releaseVersion(release.ReleaseName),
+			IsLTS:         isLTS,
+			IsSupported:   !isEOL,
+			IsRecommended: isLTS,
+			IsEOL:         isEOL,
+			IsMaintained:  !isEOL,
+			RuntimeName:   Temurin,
+		})
+	}
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("no temurin releases available: %s", strings.Join(skipped, "; "))
 	}
 
-	// Sort by major version (descending) - latest first
 	sort.Slice(versions, func(i, j int) bool {
-		iMajor := extractMajorVersion(versions[i].Version)
-		jMajor := extractMajorVersion(versions[j].Version)
-		return iMajor > jMajor
+		return extractMajorVersion(versions[i].Version) > extractMajorVersion(versions[j].Version)
 	})
 
-	a.stdout.Debug("retrieved Temurin versions from endoflife.date API", "count", len(versions))
+	a.stdout.Debug("retrieved Temurin versions from Adoptium API", "count", len(versions))
 	return versions, nil
 }
 
-// extractMajorVersion extracts the major version number from a version string
+// releaseVersion returns an Adoptium release_name without its jdk prefix.
+// "jdk-21.0.13.1+2" becomes "21.0.13.1+2" and "jdk8u512-b09" becomes "8u512-b09".
+func releaseVersion(releaseName string) string {
+	if rest, ok := strings.CutPrefix(releaseName, "jdk-"); ok {
+		return rest
+	}
+	if rest, ok := strings.CutPrefix(releaseName, "jdk"); ok && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
+		return rest
+	}
+	return releaseName
+}
+
+// extractMajorVersion extracts the major version number from a version string.
 func extractMajorVersion(version string) int {
 	// Handle different version formats: "21.0.7+6-LTS", "8u452-b09", etc.
 	parts := strings.Split(version, ".")
@@ -381,103 +394,90 @@ func (a *TemurinAdapter) CreateDownloadTasks(version endoflife.VersionInfo, plat
 		"platforms", len(platforms),
 		"output_dir", outputDir)
 
-	// Use the latest patch version for Adoptium API (e.g., "21.0.7+6" instead of "21")
-	downloadVersion := version.LatestPatch
-	if downloadVersion == "" {
-		downloadVersion = version.Version
+	major := extractMajorVersion(version.Version)
+	if major == 0 {
+		major = extractMajorVersion(version.LatestPatch)
+	}
+	if major == 0 {
+		return nil, fmt.Errorf("temurin version %q has no feature line", version.Version)
 	}
 
-	// Get Adoptium release information using the full patch version
-	release, err := a.getAdoptiumRelease(downloadVersion)
+	release, err := a.fetchLatestFeatureRelease(context.Background(), major)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get Adoptium release for version %s (latest patch: %s): %w", version.Version, downloadVersion, err)
+		return nil, fmt.Errorf("failed to get Adoptium release for version %s: %w", version.Version, err)
 	}
 
 	tasks := make([]runtime.DownloadTask, 0)
 	userAgent := "downloadruntime/1.0 (temurin)"
+	taskVersion := releaseVersion(release.ReleaseName)
 
 	for _, plat := range platforms {
-		// Find the appropriate binary for this platform
 		binary := a.findBinaryForPlatform(release, plat)
 		if binary == nil {
-			// Get available platforms for troubleshooting context
-			availablePlatforms := a.getAvailablePlatforms(release)
-
 			a.stderr.Warn("⚠️ no binary found for platform",
 				"platform", fmt.Sprintf("%s-%s", plat.OS, plat.Arch),
 				"requested_version", version.Version,
-				"actual_version_checked", downloadVersion,
-				"available_platforms", availablePlatforms,
+				"actual_version_checked", release.ReleaseName,
+				"available_platforms", a.getAvailablePlatforms(release),
 				"api_source", "adoptium",
 				"suggestion", "check if this version has binaries for your platform, or update policy to use a different version")
 			continue
 		}
 
-		// Determine which package to use (installer preferred over package)
 		pkg := a.selectPackage(binary, plat)
 		if pkg == nil {
 			a.stderr.Warn("⚠️ no suitable package found for platform",
 				"platform", fmt.Sprintf("%s-%s", plat.OS, plat.Arch),
 				"requested_version", version.Version,
-				"actual_version_checked", downloadVersion,
+				"actual_version_checked", release.ReleaseName,
 				"binary_available", true,
 				"package_types_checked", []string{"installer", "package"},
 				"suggestion", "binary exists but no installer/package found - this may indicate an issue with the Adoptium release")
 			continue
 		}
 
-		// Create output filename
 		filename := pkg.Name
 		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s-%s", plat.OS, plat.Arch), filename)
 
-		// Main download task
-		mainTask := runtime.DownloadTask{
+		tasks = append(tasks, runtime.DownloadTask{
 			URL:        pkg.Link,
 			OutputPath: outputPath,
 			Platform:   plat,
 			Runtime:    a.GetName(),
-			Version:    version.LatestPatch,
+			Version:    taskVersion,
 			FileType:   "main",
 			Headers:    map[string]string{"User-Agent": userAgent},
 			Optional:   false,
-		}
-		tasks = append(tasks, mainTask)
-
-		// Checksum download task
+		})
 		if pkg.ChecksumLink != "" {
-			checksumPath := outputPath + ".sha256.txt"
-			checksumTask := runtime.DownloadTask{
+			tasks = append(tasks, runtime.DownloadTask{
 				URL:        pkg.ChecksumLink,
-				OutputPath: checksumPath,
+				OutputPath: outputPath + ".sha256.txt",
 				Platform:   plat,
 				Runtime:    a.GetName(),
-				Version:    version.LatestPatch,
+				Version:    taskVersion,
 				FileType:   "checksum",
 				Headers:    map[string]string{"User-Agent": userAgent},
 				Optional:   true,
-			}
-			tasks = append(tasks, checksumTask)
+			})
 		}
-
-		// Signature download task
 		if pkg.SignatureLink != "" {
-			signaturePath := outputPath + ".sig"
-			signatureTask := runtime.DownloadTask{
+			tasks = append(tasks, runtime.DownloadTask{
 				URL:        pkg.SignatureLink,
-				OutputPath: signaturePath,
+				OutputPath: outputPath + ".sig",
 				Platform:   plat,
 				Runtime:    a.GetName(),
-				Version:    version.LatestPatch,
+				Version:    taskVersion,
 				FileType:   "signature",
 				Headers:    map[string]string{"User-Agent": userAgent},
 				Optional:   true,
-			}
-			tasks = append(tasks, signatureTask)
+			})
 		}
 	}
 
 	a.stdout.Debug("created Temurin download tasks",
 		"version", version.Version,
+		"release_name", release.ReleaseName,
 		"task_count", len(tasks))
 
 	return tasks, nil
@@ -963,81 +963,71 @@ func (a *TemurinAdapter) ApplyPolicy(versions []endoflife.VersionInfo, policyVer
 	return filteredVersions, nil
 }
 
-// getAdoptiumRelease fetches release information from the Adoptium API
-func (a *TemurinAdapter) getAdoptiumRelease(version string) (*AdoptiumRelease, error) {
-	// Try multiple version formats since endoflife.date and Adoptium API formats can differ
-	versionsToTry := []string{
-		version,          // Try original format first (e.g., "21.0.7+6")
-		version + "-LTS", // Try with LTS suffix for LTS versions (e.g., "21.0.7+6-LTS")
+func (a *TemurinAdapter) adoptiumBase() string {
+	base := strings.TrimRight(strings.TrimSpace(a.adoptiumBaseURL), "/")
+	if base == "" {
+		return defaultAdoptiumBaseURL
 	}
+	return base
+}
 
-	var lastErr error
-	for _, versionToTry := range versionsToTry {
-		// Format version for Adoptium API - add "jdk-" prefix if not present
-		adoptiumVersion := versionToTry
-		if !strings.HasPrefix(adoptiumVersion, "jdk-") {
-			adoptiumVersion = "jdk-" + adoptiumVersion
-		}
-
-		// Encode the version for URL
-		encodedVersion := url.QueryEscape(adoptiumVersion)
-		apiURL := fmt.Sprintf("https://api.adoptium.net/v3/assets/version/%s", encodedVersion)
-
-		a.stdout.Debug("trying Adoptium release fetch",
-			"url", apiURL,
-			"original_version", version,
-			"adoptium_version", adoptiumVersion)
-
-		req, err := http.NewRequest("GET", apiURL, nil)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to create request: %w", err)
-			continue
-		}
-
-		req.Header.Set("User-Agent", "downloadruntime/1.0 (temurin)")
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := a.httpClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to fetch Adoptium release: %w", err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusNotFound {
-			// Try next version format
-			lastErr = fmt.Errorf("version %s not found (tried %s)", version, adoptiumVersion)
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("adoptium API returned status %d for version %s (formatted as %s)", resp.StatusCode, version, adoptiumVersion)
-			continue
-		}
-
-		var releases AdoptiumAPIResponse
-		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-			lastErr = fmt.Errorf("failed to decode Adoptium API response: %w", err)
-			continue
-		}
-
-		if len(releases) == 0 {
-			lastErr = fmt.Errorf("no releases found for version %s", version)
-			continue
-		}
-
-		// Success! Return the first (and usually only) release
-		release := &releases[0]
-		a.stdout.Debug("retrieved Adoptium release",
-			"version", version,
-			"binaries", len(release.Binaries),
-			"release_name", release.ReleaseName)
-
-		return release, nil
+func (a *TemurinAdapter) fetchAvailableReleases(ctx context.Context) (*adoptiumAvailableReleases, error) {
+	var available adoptiumAvailableReleases
+	apiURL := a.adoptiumBase() + "/info/available_releases"
+	if err := a.getJSON(ctx, apiURL, &available); err != nil {
+		return nil, fmt.Errorf("failed to get Adoptium available releases: %w", err)
 	}
+	if len(available.AvailableReleases) == 0 {
+		return nil, fmt.Errorf("adoptium available releases list is empty")
+	}
+	return &available, nil
+}
 
-	// If we get here, all version formats failed
-	return nil, fmt.Errorf("failed to find Adoptium release for version %s after trying multiple formats: %w", version, lastErr)
+func (a *TemurinAdapter) fetchLatestFeatureRelease(ctx context.Context, major int) (*AdoptiumRelease, error) {
+	apiURL := fmt.Sprintf("%s/assets/feature_releases/%d/ga?image_type=jdk&jvm_impl=hotspot&vendor=eclipse&page=0&page_size=1&sort_order=DESC", a.adoptiumBase(), major)
+	var releases AdoptiumAPIResponse
+	if err := a.getJSON(ctx, apiURL, &releases); err != nil {
+		return nil, fmt.Errorf("failed to get Adoptium feature release %d: %w", major, err)
+	}
+	if len(releases) == 0 || releases[0].ReleaseName == "" {
+		return nil, fmt.Errorf("no ga release for temurin %d", major)
+	}
+	a.stdout.Debug("retrieved Adoptium feature release",
+		"major", major,
+		"release_name", releases[0].ReleaseName,
+		"binaries", len(releases[0].Binaries))
+	return &releases[0], nil
+}
+
+func (a *TemurinAdapter) getJSON(ctx context.Context, apiURL string, dest any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "downloadruntime/1.0 (temurin)")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch %s: %w", apiURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("adoptium API returned status %d for %s", resp.StatusCode, apiURL)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+		return fmt.Errorf("failed to decode Adoptium API response: %w", err)
+	}
+	return nil
+}
+
+func intSet(values []int) map[int]bool {
+	set := make(map[int]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	return set
 }
 
 // findBinaryForPlatform finds the appropriate binary for the given platform

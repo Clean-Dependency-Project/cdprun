@@ -2,11 +2,16 @@ package temurin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/clean-dependency-project/cdprun/internal/config"
@@ -14,50 +19,138 @@ import (
 	"github.com/clean-dependency-project/cdprun/internal/gpg"
 	"github.com/clean-dependency-project/cdprun/internal/platform"
 	"github.com/clean-dependency-project/cdprun/internal/runtime"
+	"github.com/clean-dependency-project/cdprun/internal/storage"
 )
 
-// mockEndOfLifeClient implements endoflife.Client for testing
-type mockEndOfLifeClient struct {
-	productInfo *endoflife.ProductInfo
-	shouldError bool
+// adoptiumFixture is one feature line served by the test Adoptium API.
+type adoptiumFixture struct {
+	major         int
+	releaseName   string
+	platforms     []string
+	featureStatus int
 }
 
-func (m *mockEndOfLifeClient) GetProductInfo(ctx context.Context, product string) (*endoflife.ProductInfo, error) {
-	if m.shouldError {
-		return nil, fmt.Errorf("mock error")
-	}
-	return m.productInfo, nil
+type recordedRequest struct {
+	method string
+	path   string
+	query  string
 }
 
-func (m *mockEndOfLifeClient) GetSupportedVersions(ctx context.Context, runtime endoflife.PolicyRuntime) ([]endoflife.VersionInfo, error) {
-	if m.shouldError {
-		return nil, fmt.Errorf("mock error")
+func newAdoptiumTestAdapter(t *testing.T, lines []adoptiumFixture) (*TemurinAdapter, *[]recordedRequest) {
+	t.Helper()
+
+	byMajor := make(map[int]adoptiumFixture, len(lines))
+	majors := make([]int, 0, len(lines))
+	lts := make([]int, 0, len(lines))
+	for _, line := range lines {
+		byMajor[line.major] = line
+		majors = append(majors, line.major)
+		if line.major != 26 && line.major != 27 {
+			lts = append(lts, line.major)
+		}
 	}
-	return []endoflife.VersionInfo{}, nil
+
+	var mu sync.Mutex
+	recorded := make([]recordedRequest, 0)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		recorded = append(recorded, recordedRequest{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery})
+		mu.Unlock()
+
+		switch {
+		case r.URL.Path == "/v3/info/available_releases":
+			body := map[string]any{
+				"available_releases":          majors,
+				"available_lts_releases":      lts,
+				"most_recent_feature_release": 27,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(body); err != nil {
+				t.Errorf("encode available releases: %v", err)
+			}
+		case strings.Contains(r.URL.Path, "/assets/feature_releases/"):
+			major := featureMajorFromPath(t, r.URL.Path)
+			line, ok := byMajor[major]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			if page > 0 {
+				http.NotFound(w, r)
+				return
+			}
+			if line.featureStatus != 0 {
+				w.WriteHeader(line.featureStatus)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode([]map[string]any{featureReleaseBody(server.URL, line.major, line.releaseName, line.platforms)}); err != nil {
+				t.Errorf("encode feature release: %v", err)
+			}
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	adapter := NewAdapter().(*TemurinAdapter)
+	adapter.adoptiumBaseURL = server.URL + "/v3"
+	return adapter, &recorded
 }
 
-func (m *mockEndOfLifeClient) ValidatePolicy(policy *endoflife.Policy) error {
-	if m.shouldError {
-		return fmt.Errorf("mock error")
+func featureMajorFromPath(t *testing.T, path string) int {
+	t.Helper()
+	const marker = "/assets/feature_releases/"
+	rest := strings.TrimPrefix(path, "/v3"+marker)
+	rest = strings.TrimPrefix(rest, marker)
+	majorText, _, _ := strings.Cut(rest, "/")
+	major, err := strconv.Atoi(majorText)
+	if err != nil {
+		t.Fatalf("feature release path %s: %v", path, err)
 	}
-	return nil
+	return major
 }
 
-func (m *mockEndOfLifeClient) EnrichVersionInfo(ctx context.Context, runtime endoflife.PolicyRuntime, policyVersion endoflife.PolicyVersion) (*endoflife.VersionInfo, error) {
-	if m.shouldError {
-		return nil, fmt.Errorf("mock error")
+func featureReleaseBody(serverURL string, major int, releaseName string, platforms []string) map[string]any {
+	binaries := make([]map[string]any, 0, len(platforms))
+	for _, plat := range platforms {
+		osName, arch, _ := strings.Cut(plat, "-")
+		link := fmt.Sprintf("%s/pkg/%d/%s.tar.gz", serverURL, major, plat)
+		binaries = append(binaries, map[string]any{
+			"os":           osName,
+			"architecture": arch,
+			"image_type":   "jdk",
+			"jvm_impl":     "hotspot",
+			"package": map[string]any{
+				"name":           plat + ".tar.gz",
+				"link":           link,
+				"checksum_link":  link + ".sha256.txt",
+				"signature_link": link + ".sig",
+			},
+		})
 	}
-	return &endoflife.VersionInfo{
-		Version:     policyVersion.Version,
-		IsSupported: policyVersion.Supported,
-	}, nil
+	return map[string]any{
+		"release_name": releaseName,
+		"release_link": serverURL + "/releases/tag/" + releaseName,
+		"release_type": "ga",
+		"binaries":     binaries,
+	}
 }
 
-func (m *mockEndOfLifeClient) GetMaintainedReleases(ctx context.Context, product string) ([]endoflife.VersionInfo, error) {
-	if m.shouldError {
-		return nil, fmt.Errorf("mock error")
+func standardLines() []adoptiumFixture {
+	return []adoptiumFixture{
+		{major: 27, releaseName: "jdk-27.0.1.1+4", platforms: []string{"linux-x64"}},
+		{major: 26, releaseName: "jdk-26.0.2.1+1", platforms: []string{"linux-x64"}},
+		{major: 25, releaseName: "jdk-25.0.5.1+2", platforms: []string{"linux-x64"}},
+		{major: 21, releaseName: "jdk-21.0.13.1+2", platforms: []string{"linux-x64"}},
+		{major: 17, releaseName: "jdk-17.0.21.1+2", platforms: []string{"linux-x64", "linux-aarch64"}},
+		{major: 11, releaseName: "jdk-11.0.33+10", platforms: []string{"linux-x64"}},
+		{major: 8, releaseName: "jdk8u512-b09", platforms: []string{"linux-x64"}},
 	}
-	return []endoflife.VersionInfo{}, nil
 }
 
 func createTestTemurinPolicyFile(t *testing.T) string {
@@ -98,8 +191,7 @@ func createTestTemurinPolicyFile(t *testing.T) string {
 }
 
 func TestNewAdapter(t *testing.T) {
-	client := &mockEndOfLifeClient{}
-	adapter := NewAdapter(client)
+	adapter := NewAdapter()
 
 	if adapter == nil {
 		t.Error("NewAdapter returned nil")
@@ -110,13 +202,13 @@ func TestNewAdapter(t *testing.T) {
 		t.Error("NewAdapter did not return a TemurinAdapter")
 	}
 
-	if temurinAdapter.endoflifeClient != client {
-		t.Error("NewAdapter did not set endoflife client correctly")
+	if temurinAdapter.adoptiumBaseURL != defaultAdoptiumBaseURL {
+		t.Errorf("adoptiumBaseURL = %s, want %s", temurinAdapter.adoptiumBaseURL, defaultAdoptiumBaseURL)
 	}
 }
 
 func TestTemurinAdapter_GetName(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 	name := adapter.GetName()
 
 	if name != "temurin" {
@@ -125,11 +217,11 @@ func TestTemurinAdapter_GetName(t *testing.T) {
 }
 
 func TestTemurinAdapter_GetEndOfLifeProduct(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 	product := adapter.GetEndOfLifeProduct()
 
-	if product != "temurin" {
-		t.Errorf("GetEndOfLifeProduct() = %s, want temurin", product)
+	if product != "" {
+		t.Errorf("GetEndOfLifeProduct() = %s, want empty", product)
 	}
 }
 
@@ -142,7 +234,7 @@ func TestTemurinAdapter_GetSupportedPlatforms(t *testing.T) {
 			{OS: "mac", Arch: []string{"x64", "aarch64"}, FileExtension: "pkg", DownloadName: "mac"},
 		},
 	}
-	adapter := NewAdapterWithConfig(&mockEndOfLifeClient{}, runtimeConfig, nil, slog.Default(), slog.Default())
+	adapter := NewAdapterWithConfig(runtimeConfig, nil, slog.Default(), slog.Default())
 	platforms := adapter.GetSupportedPlatforms()
 
 	if len(platforms) == 0 {
@@ -179,219 +271,250 @@ func TestTemurinAdapter_GetSupportedPlatforms(t *testing.T) {
 }
 
 func TestTemurinAdapter_ListVersions(t *testing.T) {
-	// Create a mock client with properly structured test data
-	mockClient := &mockEndOfLifeClient{
-		productInfo: &endoflife.ProductInfo{
-			SchemaVersion: "1.0",
-			Result: struct {
-				Name           string                 `json:"name"`
-				Aliases        []string               `json:"aliases"`
-				Label          string                 `json:"label"`
-				Category       string                 `json:"category"`
-				Tags           []string               `json:"tags"`
-				VersionCommand string                 `json:"versionCommand,omitempty"`
-				Identifiers    []endoflife.Identifier `json:"identifiers,omitempty"`
-				Labels         endoflife.Labels       `json:"labels,omitempty"`
-				Links          endoflife.Links        `json:"links,omitempty"`
-				Releases       []endoflife.Release    `json:"releases"`
-			}{
-				Name:     "temurin",
-				Label:    "Temurin",
-				Category: "runtime",
-				Releases: []endoflife.Release{
-					{
-						Name:         "21",
-						ReleaseDate:  "2023-09-19",
-						IsLTS:        true,
-						IsMaintained: true,
-						IsEOL:        false,
-						Latest: struct {
-							Name string `json:"name"`
-							Date string `json:"date"`
-							Link string `json:"link"`
-						}{
-							Name: "21.0.7+6",
-							Date: "2024-01-16",
-						},
-					},
-					{
-						Name:         "17",
-						ReleaseDate:  "2021-09-14",
-						IsLTS:        true,
-						IsMaintained: true,
-						IsEOL:        false,
-						Latest: struct {
-							Name string `json:"name"`
-							Date string `json:"date"`
-							Link string `json:"link"`
-						}{
-							Name: "17.0.9+9",
-							Date: "2024-01-16",
-						},
-					},
-				},
-			},
-		},
-	}
-
-	adapter := NewAdapter(mockClient)
+	adapter, recorded := newAdoptiumTestAdapter(t, standardLines())
 
 	versions, err := adapter.ListVersions(context.Background())
 	if err != nil {
-		t.Errorf("ListVersions() error = %v", err)
-		return
+		t.Fatalf("ListVersions() error = %v", err)
 	}
 
+	byMajor := map[string]endoflife.VersionInfo{}
+	for _, version := range versions {
+		byMajor[version.Version] = version
+		if version.RuntimeName != "temurin" {
+			t.Errorf("Version %s runtime = %s, want temurin", version.Version, version.RuntimeName)
+		}
+	}
+
+	checks := []struct {
+		major string
+		patch string
+		lts   bool
+		eol   bool
+	}{
+		{major: "17", patch: "17.0.21.1+2", lts: true},
+		{major: "21", patch: "21.0.13.1+2", lts: true},
+		{major: "25", patch: "25.0.5.1+2", lts: true},
+		{major: "27", patch: "27.0.1.1+4", lts: false},
+		{major: "26", patch: "26.0.2.1+1", lts: false, eol: true},
+	}
+	for _, check := range checks {
+		version, ok := byMajor[check.major]
+		if !ok {
+			t.Errorf("missing major %s", check.major)
+			continue
+		}
+		if version.LatestPatch != check.patch {
+			t.Errorf("major %s LatestPatch = %s, want %s", check.major, version.LatestPatch, check.patch)
+		}
+		if version.IsLTS != check.lts {
+			t.Errorf("major %s IsLTS = %v, want %v", check.major, version.IsLTS, check.lts)
+		}
+		if version.IsEOL != check.eol {
+			t.Errorf("major %s IsEOL = %v, want %v", check.major, version.IsEOL, check.eol)
+		}
+		if version.EOLDate != "" {
+			t.Errorf("major %s EOLDate = %s, want empty", check.major, version.EOLDate)
+		}
+	}
+
+	for _, major := range []string{"17", "21", "25"} {
+		path := "/v3/assets/feature_releases/" + major + "/ga"
+		if !sawRequest(*recorded, http.MethodGet, path) {
+			t.Errorf("expected GET %s", path)
+		}
+	}
+	if sawRequest(*recorded, http.MethodGet, "/v3/assets/version/jdk-21.0.13.1+2") {
+		t.Error("ListVersions requested /assets/version")
+	}
+}
+
+func TestTemurinAdapter_ListVersions_DoesNotCallGitHub(t *testing.T) {
+	adapter, recorded := newAdoptiumTestAdapter(t, standardLines())
+
+	versions, err := adapter.ListVersions(context.Background())
+	if err != nil {
+		t.Fatalf("ListVersions() error = %v", err)
+	}
+	found := false
+	for _, version := range versions {
+		if version.Version == "21" && version.LatestPatch == "21.0.13.1+2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ListVersions() dropped major 21")
+	}
+	for _, req := range *recorded {
+		if req.method == http.MethodHead || strings.Contains(req.path, "/releases/tag/") {
+			t.Errorf("ListVersions called %s %s", req.method, req.path)
+		}
+	}
+}
+
+func TestTemurinAdapter_ListVersions_FeatureLineError(t *testing.T) {
+	lines := standardLines()
+	for i := range lines {
+		if lines[i].major == 21 {
+			lines[i].featureStatus = http.StatusInternalServerError
+		}
+	}
+	adapter, _ := newAdoptiumTestAdapter(t, lines)
+
+	versions, err := adapter.ListVersions(context.Background())
+	if err != nil {
+		t.Fatalf("ListVersions() error = %v, want the other lines", err)
+	}
+	for _, version := range versions {
+		if version.Version == "21" {
+			t.Fatal("ListVersions() kept major 21 after the feature-release API failed")
+		}
+	}
 	if len(versions) == 0 {
-		t.Error("ListVersions() returned empty list")
-		return
+		t.Fatal("ListVersions() returned no versions")
+	}
+}
+
+func TestTemurinAdapter_GetMaintainedVersions(t *testing.T) {
+	adapter, _ := newAdoptiumTestAdapter(t, standardLines())
+
+	versions, err := adapter.GetMaintainedVersions(context.Background())
+	if err != nil {
+		t.Fatalf("GetMaintainedVersions() error = %v", err)
 	}
 
-	// Check that versions are properly structured
-	for _, v := range versions {
-		if v.RuntimeName != "temurin" {
-			t.Errorf("Version %s has runtime name %s, want temurin", v.Version, v.RuntimeName)
-		}
-
-		// Version should not be empty
-		if v.Version == "" {
-			t.Error("Version has empty version string")
-		}
-	}
-
-	// Verify we got the expected versions
-	expectedVersions := map[string]bool{
-		"21": false,
-		"17": false,
-	}
-
-	for _, v := range versions {
-		if _, exists := expectedVersions[v.Version]; exists {
-			expectedVersions[v.Version] = true
+	found := map[string]bool{}
+	for _, version := range versions {
+		found[version.Version] = true
+		if version.IsEOL {
+			t.Errorf("maintained list included EOL %s", version.Version)
 		}
 	}
-
-	// Check that all expected versions were found
-	for version, found := range expectedVersions {
-		if !found {
-			t.Errorf("Expected version %s not found in results", version)
-		}
+	if !found["21"] || !found["27"] {
+		t.Fatalf("maintained versions = %v, want 21 and 27", found)
 	}
-
-	t.Logf("Found %d Temurin versions", len(versions))
+	if found["26"] {
+		t.Fatal("maintained versions included EOL 26")
+	}
 }
 
 func TestTemurinAdapter_GetLatestVersion(t *testing.T) {
-	// Create a mock client with test data
-	mockClient := &mockEndOfLifeClient{
-		productInfo: &endoflife.ProductInfo{
-			SchemaVersion: "1.0",
-			Result: struct {
-				Name           string                 `json:"name"`
-				Aliases        []string               `json:"aliases"`
-				Label          string                 `json:"label"`
-				Category       string                 `json:"category"`
-				Tags           []string               `json:"tags"`
-				VersionCommand string                 `json:"versionCommand,omitempty"`
-				Identifiers    []endoflife.Identifier `json:"identifiers,omitempty"`
-				Labels         endoflife.Labels       `json:"labels,omitempty"`
-				Links          endoflife.Links        `json:"links,omitempty"`
-				Releases       []endoflife.Release    `json:"releases"`
-			}{
-				Name:     "temurin",
-				Label:    "Temurin",
-				Category: "runtime",
-				Releases: []endoflife.Release{
-					{
-						Name:         "21",
-						ReleaseDate:  "2023-09-19",
-						IsLTS:        true,
-						IsMaintained: true,
-						IsEOL:        false,
-						Latest: struct {
-							Name string `json:"name"`
-							Date string `json:"date"`
-							Link string `json:"link"`
-						}{
-							Name: "21.0.7+6",
-							Date: "2024-01-16",
-						},
-					},
-					{
-						Name:         "17",
-						ReleaseDate:  "2021-09-14",
-						IsLTS:        true,
-						IsMaintained: true,
-						IsEOL:        false,
-						Latest: struct {
-							Name string `json:"name"`
-							Date string `json:"date"`
-							Link string `json:"link"`
-						}{
-							Name: "17.0.9+9",
-							Date: "2024-01-16",
-						},
-					},
-				},
-			},
-		},
-	}
-
-	adapter := NewAdapter(mockClient)
+	adapter, _ := newAdoptiumTestAdapter(t, standardLines())
 
 	tests := []struct {
 		name    string
 		opts    runtime.VersionOptions
+		want    string
 		wantErr bool
 	}{
-		{
-			name:    "default options - should return LTS",
-			opts:    runtime.VersionOptions{},
-			wantErr: false,
-		},
-		{
-			name:    "latest only",
-			opts:    runtime.VersionOptions{Latest: true},
-			wantErr: false,
-		},
-		{
-			name:    "LTS only",
-			opts:    runtime.VersionOptions{LTSOnly: true},
-			wantErr: false,
-		},
-		{
-			name:    "recommended only",
-			opts:    runtime.VersionOptions{RecommendedOnly: true},
-			wantErr: false,
-		},
+		{name: "default options", opts: runtime.VersionOptions{}, want: "27"},
+		{name: "LTS only", opts: runtime.VersionOptions{LTSOnly: true}, want: "25"},
+		{name: "recommended only", opts: runtime.VersionOptions{RecommendedOnly: true}, want: "25"},
+		{name: "major 21", opts: runtime.VersionOptions{VersionPattern: "21"}, want: "21"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			version, err := adapter.GetLatestVersion(context.Background(), tt.opts)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GetLatestVersion() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("GetLatestVersion() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
 				return
 			}
-
-			if !tt.wantErr {
-				if version.Version == "" {
-					t.Error("GetLatestVersion() returned empty version")
-				}
-				if version.RuntimeName != "temurin" {
-					t.Errorf("GetLatestVersion() runtime name = %s, want temurin", version.RuntimeName)
-				}
-				// For LTS tests, verify we got an LTS version
-				if tt.opts.LTSOnly && !version.IsLTS {
-					t.Error("GetLatestVersion() with LTSOnly returned non-LTS version")
-				}
+			if version.Version != tt.want {
+				t.Errorf("GetLatestVersion() version = %s, want %s", version.Version, tt.want)
+			}
+			if version.RuntimeName != "temurin" {
+				t.Errorf("GetLatestVersion() runtime = %s, want temurin", version.RuntimeName)
+			}
+			if tt.opts.LTSOnly && !version.IsLTS {
+				t.Error("GetLatestVersion() with LTSOnly returned non-LTS version")
 			}
 		})
 	}
 }
 
+func TestTemurinAdapter_CreateDownloadTasks_UsesAPIPackages(t *testing.T) {
+	adapter, recorded := newAdoptiumTestAdapter(t, standardLines())
+
+	tasks, err := adapter.CreateDownloadTasks(endoflife.VersionInfo{
+		Version:     "17",
+		LatestPatch: "17.0.21.1+2",
+		RuntimeName: "temurin",
+	}, []platform.Platform{
+		{OS: "linux", Arch: "x64", FileExt: "tar.gz", Classifier: "linux-x64"},
+		{OS: "linux", Arch: "aarch64", FileExt: "tar.gz", Classifier: "linux-aarch64"},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateDownloadTasks() error = %v", err)
+	}
+	if len(tasks) != 6 {
+		t.Fatalf("CreateDownloadTasks() returned %d tasks, want 6 from the API packages", len(tasks))
+	}
+	for _, req := range *recorded {
+		if req.method == http.MethodHead {
+			t.Errorf("CreateDownloadTasks called HEAD %s", req.path)
+		}
+	}
+}
+
+func TestReleaseVersion(t *testing.T) {
+	tests := []struct {
+		releaseName string
+		want        string
+	}{
+		{releaseName: "jdk-21.0.13.1+2", want: "21.0.13.1+2"},
+		{releaseName: "jdk-11.0.33+10", want: "11.0.33+10"},
+		{releaseName: "jdk-25+36", want: "25+36"},
+		{releaseName: "jdk8u512-b09", want: "8u512-b09"},
+		{releaseName: "21.0.13.1+2", want: "21.0.13.1+2"},
+		{releaseName: "jdk", want: "jdk"},
+		{releaseName: "", want: ""},
+	}
+	for _, tt := range tests {
+		if got := releaseVersion(tt.releaseName); got != tt.want {
+			t.Errorf("releaseVersion(%q) = %q, want %q", tt.releaseName, got, tt.want)
+		}
+	}
+}
+
+func TestTemurinAdapter_ListVersions_PatchReadableDownstream(t *testing.T) {
+	adapter, _ := newAdoptiumTestAdapter(t, standardLines())
+
+	versions, err := adapter.ListVersions(context.Background())
+	if err != nil {
+		t.Fatalf("ListVersions() error = %v", err)
+	}
+	for _, version := range versions {
+		if strings.HasPrefix(version.LatestPatch, "jdk") {
+			t.Errorf("major %s LatestPatch = %s, want no jdk prefix", version.Version, version.LatestPatch)
+		}
+		if version.Version == "8" {
+			continue
+		}
+		major, _, _, err := storage.ParseSemver(version.LatestPatch)
+		if err != nil {
+			t.Errorf("ParseSemver(%s) error = %v", version.LatestPatch, err)
+			continue
+		}
+		if strconv.Itoa(major) != version.Version {
+			t.Errorf("ParseSemver(%s) major = %d, want %s", version.LatestPatch, major, version.Version)
+		}
+	}
+}
+
+func sawRequest(recorded []recordedRequest, method, path string) bool {
+	for _, req := range recorded {
+		if req.method == method && req.path == path {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTemurinAdapter_LoadPolicy(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 	policyPath := createTestTemurinPolicyFile(t)
 
 	policy, err := adapter.LoadPolicy(policyPath)
@@ -444,7 +567,7 @@ func TestTemurinAdapter_LoadPolicy(t *testing.T) {
 }
 
 func TestTemurinAdapter_LoadPolicy_NonExistentFile(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 
 	_, err := adapter.LoadPolicy("/nonexistent/path/policy.json")
 	if err == nil {
@@ -453,38 +576,18 @@ func TestTemurinAdapter_LoadPolicy_NonExistentFile(t *testing.T) {
 }
 
 func TestTemurinAdapter_ApplyPolicy(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 
 	versions := []endoflife.VersionInfo{
-		{
-			Version:     "21.0.7+6-LTS",
-			LatestPatch: "21.0.7+6-LTS",
-			IsSupported: true, // Set as supported to pass validation
-			IsLTS:       true,
-		},
-		{
-			Version:     "17.0.15+6-LTS",
-			LatestPatch: "17.0.15+6-LTS",
-			IsSupported: true, // Set as supported to pass validation
-			IsLTS:       true,
-		},
-		{
-			Version:     "16.0.2+7",
-			IsSupported: false, // Not in policy, should be filtered out
-		},
+		{Version: "21", LatestPatch: "21.0.13.1+2", IsLTS: true},
+		{Version: "17", LatestPatch: "17.0.21.1+2", IsLTS: true},
+		{Version: "8", LatestPatch: "8u512-b09", IsLTS: true},
 	}
 
 	policy := []endoflife.PolicyVersion{
-		{
-			Version:   "21.*", // Use pattern matching
-			Supported: true,
-			LTS:       true,
-		},
-		{
-			Version:   "17.*", // Use pattern matching
-			Supported: true,
-			LTS:       true,
-		},
+		{Version: "21", Supported: true, LTS: true},
+		{Version: "17", Supported: true, LTS: true},
+		{Version: "8", Supported: false},
 	}
 
 	filtered, err := adapter.ApplyPolicy(versions, policy)
@@ -493,22 +596,88 @@ func TestTemurinAdapter_ApplyPolicy(t *testing.T) {
 		return
 	}
 
-	// Should have the two supported versions
-	if len(filtered) < 2 {
-		t.Errorf("ApplyPolicy() returned %d versions, want at least 2", len(filtered))
+	if len(filtered) != 2 {
+		t.Fatalf("ApplyPolicy() returned %d versions, want 2", len(filtered))
 	}
 
+	kept := map[string]string{}
 	for _, version := range filtered {
-		switch version.Version {
-		case "21.0.7+6-LTS":
-			if version.LatestPatch != "21.0.7+6-LTS" {
-				t.Errorf("ApplyPolicy() changed latest patch for %s: got %s", version.Version, version.LatestPatch)
-			}
-		case "17.0.15+6-LTS":
-			if version.LatestPatch != "17.0.15+6-LTS" {
-				t.Errorf("ApplyPolicy() changed latest patch for %s: got %s", version.Version, version.LatestPatch)
-			}
+		kept[version.Version] = version.LatestPatch
+	}
+	if kept["21"] != "21.0.13.1+2" {
+		t.Errorf("ApplyPolicy() latest patch for 21 = %s", kept["21"])
+	}
+	if kept["17"] != "17.0.21.1+2" {
+		t.Errorf("ApplyPolicy() latest patch for 17 = %s", kept["17"])
+	}
+	if _, ok := kept["8"]; ok {
+		t.Error("ApplyPolicy() kept unsupported major 8")
+	}
+}
+
+func TestTemurinAdapter_CreateDownloadTasks_FromFeatureRelease(t *testing.T) {
+	lines := standardLines()
+	for i := range lines {
+		if lines[i].major == 21 {
+			lines[i].platforms = []string{"linux-x64"}
 		}
+	}
+	adapter, recorded := newAdoptiumTestAdapter(t, lines)
+
+	if _, err := adapter.ListVersions(context.Background()); err != nil {
+		t.Fatalf("ListVersions() error = %v", err)
+	}
+
+	tasks, err := adapter.CreateDownloadTasks(endoflife.VersionInfo{
+		Version:     "21",
+		LatestPatch: "21.0.13.1+2",
+		RuntimeName: "temurin",
+	}, []platform.Platform{
+		{OS: "linux", Arch: "x64", FileExt: "tar.gz", Classifier: "linux-x64"},
+		{OS: "windows", Arch: "x64", FileExt: "zip", Classifier: "windows-x64"},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateDownloadTasks() error = %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("CreateDownloadTasks() returned %d tasks, want 3 for linux-x64", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.Platform.OS != "linux" {
+			t.Errorf("task platform = %s, want linux", task.Platform.OS)
+		}
+		if task.Version != "21.0.13.1+2" {
+			t.Errorf("task version = %s, want the release version without the jdk prefix", task.Version)
+		}
+	}
+	for _, req := range *recorded {
+		if req.method == http.MethodHead {
+			t.Errorf("CreateDownloadTasks called HEAD %s", req.path)
+		}
+		if strings.Contains(req.path, "/assets/version/") {
+			t.Errorf("requested %s", req.path)
+		}
+		if strings.Contains(req.path, "/feature_releases/21/") && strings.Contains(req.query, "page=1") {
+			t.Error("download requested the previous GA page")
+		}
+	}
+}
+
+func TestTemurinAdapter_CreateDownloadTasks_NoPackages(t *testing.T) {
+	adapter, _ := newAdoptiumTestAdapter(t, standardLines())
+
+	tasks, err := adapter.CreateDownloadTasks(endoflife.VersionInfo{
+		Version:     "21",
+		LatestPatch: "21.0.13.1+2",
+		RuntimeName: "temurin",
+	}, []platform.Platform{
+		{OS: "windows", Arch: "x64", FileExt: "zip", Classifier: "windows-x64"},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateDownloadTasks() error = %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("CreateDownloadTasks() returned %d tasks, want none", len(tasks))
 	}
 }
 
@@ -518,21 +687,17 @@ func TestTemurinAdapter_CreateDownloadTasks(t *testing.T) {
 		t.Skip("Skipping TestTemurinAdapter_CreateDownloadTasks in short mode")
 	}
 
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 
 	version := endoflife.VersionInfo{
-		Version:     "21.0.1+12-LTS", // Use a real version format
-		LatestPatch: "21.0.1+12-LTS",
+		Version:     "21",
+		LatestPatch: "21",
 		RuntimeName: "temurin",
-		IsSupported: true, // Make sure it's supported to pass validation
+		IsSupported: true,
 	}
 
-	// Use Linux arch pairs Adoptium consistently ships for this LTS build. Windows
-	// (and other) installers are not guaranteed for every patch; the adapter skips
-	// missing platforms, which made the old linux+windows expectation flaky.
 	platforms := []platform.Platform{
 		{OS: "linux", Arch: "x64", FileExt: "tar.gz", Classifier: "linux-x64"},
-		{OS: "linux", Arch: "aarch64", FileExt: "tar.gz", Classifier: "linux-aarch64"},
 	}
 
 	outputDir := "/tmp/test"
@@ -610,7 +775,7 @@ func TestTemurinAdapter_ProcessDownloads(t *testing.T) {
 		t.Skip("Skipping TestTemurinAdapter_ProcessDownloads in short mode")
 	}
 
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 
 	// Create test tasks that won't actually download (invalid URLs)
 	tasks := []runtime.DownloadTask{
@@ -657,7 +822,7 @@ func TestTemurinAdapter_ProcessDownloads(t *testing.T) {
 }
 
 func TestTemurinAdapter_GetVerificationStrategy(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{})
+	adapter := NewAdapter()
 	strategy := adapter.GetVerificationStrategy()
 
 	if strategy == nil {
@@ -677,49 +842,21 @@ func TestTemurinAdapter_GetAdoptiumAPI(t *testing.T) {
 		t.Skip("Skipping Adoptium API test in short mode")
 	}
 
-	adapter := NewAdapter(&mockEndOfLifeClient{}).(*TemurinAdapter)
+	adapter := NewAdapter().(*TemurinAdapter)
 
-	tests := []struct {
-		name    string
-		version string
-		wantErr bool
-	}{
-		{
-			name:    "Valid LTS version",
-			version: "21.0.1+12-LTS",
-			wantErr: false,
-		},
-		{
-			name:    "Valid non-LTS version",
-			version: "24.0.1+9.1",
-			wantErr: false,
-		},
-		{
-			name:    "Invalid version",
-			version: "invalid-version",
-			wantErr: true,
-		},
+	release, err := adapter.fetchLatestFeatureRelease(context.Background(), 21)
+	if err != nil {
+		t.Fatalf("fetchLatestFeatureRelease(21) error = %v", err)
+	}
+	if release.ReleaseName == "" {
+		t.Fatal("fetchLatestFeatureRelease(21) returned an empty release_name")
+	}
+	if len(release.Binaries) == 0 {
+		t.Fatal("fetchLatestFeatureRelease(21) returned no binaries")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			release, err := adapter.getAdoptiumRelease(tt.version)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("getAdoptiumRelease() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if !tt.wantErr {
-				if release == nil {
-					t.Error("getAdoptiumRelease() returned nil release for valid version")
-				} else {
-					if len(release.Binaries) == 0 {
-						t.Error("getAdoptiumRelease() returned release with no binaries")
-					}
-					t.Logf("Found %d binaries for version %s", len(release.Binaries), tt.version)
-				}
-			}
-		})
+	if _, err := adapter.fetchLatestFeatureRelease(context.Background(), 999); err == nil {
+		t.Fatal("fetchLatestFeatureRelease(999) error = nil, want error")
 	}
 }
 
@@ -729,7 +866,7 @@ func TestTemurinAdapter_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	adapter := NewAdapter(endoflife.NewClient(endoflife.DefaultConfig()))
+	adapter := NewAdapter().(*TemurinAdapter)
 
 	// Test the complete flow
 	ctx := context.Background()
@@ -769,25 +906,27 @@ func TestTemurinAdapter_Integration(t *testing.T) {
 		t.Error("Integration test: no LTS versions found")
 	}
 
-	// Verify that common JDK versions are present
-	expectedMajorVersions := []string{"21", "17", "11", "8"}
-	foundVersions := make(map[string]bool)
-
-	for _, v := range versions {
-		foundVersions[v.Version] = true
-	}
-
-	for _, expected := range expectedMajorVersions {
-		if !foundVersions[expected] {
-			t.Logf("Integration test: Expected version %s not found (may be normal)", expected)
+	for _, version := range versions {
+		if version.LatestPatch == "" {
+			t.Errorf("version %s has an empty release name", version.Version)
+			continue
+		}
+		major := extractMajorVersion(version.Version)
+		release, err := adapter.fetchLatestFeatureRelease(ctx, major)
+		if err != nil {
+			t.Errorf("feature release for %s: %v", version.Version, err)
+			continue
+		}
+		if want := releaseVersion(release.ReleaseName); version.LatestPatch != want {
+			t.Errorf("version %s LatestPatch = %s, want %s from release_name %s", version.Version, version.LatestPatch, want, release.ReleaseName)
 		}
 	}
 
-	t.Logf("Integration test: Found %d Temurin versions, latest: %s", len(versions), firstVersion.Version)
+	t.Logf("Integration test: Found %d Temurin versions, latest: %s %s", len(versions), firstVersion.Version, firstVersion.LatestPatch)
 }
 
 func TestTemurinAdapter_LoadTemurinGPGKeys(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{}).(*TemurinAdapter)
+	adapter := NewAdapter().(*TemurinAdapter)
 
 	keyRing, err := adapter.LoadTemurinGPGKeys()
 	if err != nil {
@@ -835,7 +974,7 @@ func TestTemurinVerificationStrategy(t *testing.T) {
 }
 
 func TestTemurinAdapter_VerifySignature(t *testing.T) {
-	adapter := NewAdapter(&mockEndOfLifeClient{}).(*TemurinAdapter)
+	adapter := NewAdapter().(*TemurinAdapter)
 
 	// Create test files
 	tempDir := t.TempDir()

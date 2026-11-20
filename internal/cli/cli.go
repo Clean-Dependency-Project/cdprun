@@ -628,13 +628,13 @@ func initializeManager(configPath string, db *storage.DB, stdout, stderr *slog.L
 				"endoflife_product", runtimeConfig.EndOfLifeProduct,
 				"policy_file", runtimeConfig.PolicyFile)
 		case "temurin":
-			adapter := temurinAdapter.NewAdapterWithConfig(eolClient, &runtimeConfig, &cfg.Config, stdout, stderr)
+			adapter := temurinAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
 			if err := registry.Register("temurin", adapter); err != nil {
 				return nil, nil, fmt.Errorf("failed to register temurin adapter: %w", err)
 			}
 			stdout.Info("registered runtime adapter",
 				"runtime", runtimeName,
-				"endoflife_product", runtimeConfig.EndOfLifeProduct,
+				"version_source", "adoptium",
 				"policy_file", runtimeConfig.PolicyFile)
 		case "vscode":
 			adapter := vscodeAdapter.NewAdapterWithConfig(&runtimeConfig, &cfg.Config, stdout, stderr)
@@ -881,13 +881,16 @@ func downloadSingleRuntime(c *cli.Context, manager *runtime.Manager, cfg *config
 			if _, err := os.Stat(policyFilePath); err == nil {
 				stdout.Info("found policy file, using it for version discovery", "path", policyFilePath)
 
-				// Get all versions from endoflife.date API
 				allVersions, err := manager.ListVersions(context.Background(), runtimeName)
 				if err != nil {
 					stderr.Error("failed to list versions", "runtime", runtimeName, "error", err)
 					return fmt.Errorf("failed to list versions: %w", err)
 				}
-				stdout.Info("retrieved versions from endoflife.date", "runtime", runtimeName, "version_count", len(allVersions))
+				versionSource := "endoflife.date"
+				if provider.GetEndOfLifeProduct() == "" {
+					versionSource = runtimeName + " upstream API"
+				}
+				stdout.Info("retrieved versions", "runtime", runtimeName, "source", versionSource, "version_count", len(allVersions))
 
 				// Load policy file
 				policyVersions, err := provider.LoadPolicy(policyFilePath)

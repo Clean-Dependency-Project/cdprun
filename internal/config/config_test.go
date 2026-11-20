@@ -700,7 +700,7 @@ func TestDefaultConfig(t *testing.T) {
 			t.Errorf("Expected runtime %q to be enabled in default config", name)
 		}
 
-		if runtime.EndOfLifeProduct == "" {
+		if runtime.EndOfLifeProduct == "" && !RuntimeSkipsEndOfLifeProduct(name) {
 			t.Errorf("Expected runtime %q to have endoflife_product in default config", name)
 		}
 

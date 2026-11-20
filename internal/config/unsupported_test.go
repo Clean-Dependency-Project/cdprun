@@ -93,6 +93,10 @@ func TestUnsupportedConfig_IsVersionUnsupported(t *testing.T) {
 		"python": {
 			{Version: "3.8", EOLDate: "2024-10-07"},
 		},
+		"temurin": {
+			{Version: "8"},
+			{Version: "22"},
+		},
 	}
 
 	tests := []struct {
@@ -100,9 +104,14 @@ func TestUnsupportedConfig_IsVersionUnsupported(t *testing.T) {
 		version string
 		want    bool
 	}{
+		{"temurin", "8u512-b09", true},
+		{"temurin", "22.0.2+9", true},
+		{"temurin", "21.0.13.1+2", false},
+		{"temurin", "220.0.1+1", false}, // false positive guard
+		{"temurin", "22", true},
 		{"nodejs", "16.20.2", true},
 		{"nodejs", "16.0.0", true},
-		{"nodejs", "16", true},      // exact match
+		{"nodejs", "16", true},       // exact match
 		{"nodejs", "160.0.1", false}, // false positive guard
 		{"nodejs", "14.21.3", true},
 		{"nodejs", "18.20.0", false}, // not in rules
